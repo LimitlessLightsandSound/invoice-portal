@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoice Review — Limitless Lights &amp; Sound</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#0D3A6E;--navy-d:#0a2c54;--navy-l:#1b4f8f;--bg:#f7f6f2;--card:#fff;
+    --ink:#1c2530;--muted:#6b7785;--line:#e4e2db;--line-2:#d4d1c8;
+    --blue:#2f6fb3;--green:#2e9e6b;--amber:#e0a32e;--red:#d6543e;--violet:#7a5bb0;
+    --blue-bg:#e9f1fa;--green-bg:#e6f5ed;--amber-bg:#fdf3df;--red-bg:#fbe9e5;--violet-bg:#efe9f6;
+    --shadow:0 1px 2px rgba(13,58,110,.04),0 8px 24px rgba(13,58,110,.06);
+    --shadow-lg:0 4px 12px rgba(13,58,110,.08),0 20px 48px rgba(13,58,110,.12);--radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:radial-gradient(1200px 600px at 85% -10%,rgba(47,111,179,.06),transparent 60%),
+               radial-gradient(900px 500px at -10% 110%,rgba(46,158,107,.05),transparent 60%)}
+  .wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:0 22px 80px}
+
+  header{background:linear-gradient(135deg,var(--navy),var(--navy-d));color:#fff;margin-bottom:30px;box-shadow:0 12px 40px rgba(13,58,110,.22)}
+  .hd-inner{max-width:1080px;margin:0 auto;padding:24px 22px;display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:14px}
+  .logo{width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);display:grid;place-items:center;flex-shrink:0}
+  .logo svg{width:23px;height:23px}
+  .brand h1{font-family:'Playfair Display',serif;font-weight:800;font-size:23px;line-height:1.1}
+  .brand p{font-size:12px;color:rgba(255,255,255,.62);font-weight:500;margin-top:2px}
+  .me{display:flex;align-items:center;gap:12px}
+  .me .who{text-align:right}.me .who .n{font-weight:700;font-size:14px}.me .who .r{font-size:11.5px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.5px}
+  .me .av{width:40px;height:40px;border-radius:11px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);display:grid;place-items:center;font-weight:700;font-size:15px}
+  .logout{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;font-family:'Inter';font-weight:600;font-size:12.5px;padding:8px 14px;border-radius:8px;cursor:pointer;transition:.15s}
+  .logout:hover{background:rgba(255,255,255,.2)}
+
+  /* LOGIN */
+  #login{max-width:420px;margin:8vh auto 0;position:relative;z-index:1}
+  .login-card{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow-lg);padding:38px 34px}
+  .login-card .lg{width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,var(--navy),var(--navy-l));display:grid;place-items:center;margin:0 auto 18px}
+  .login-card .lg svg{width:28px;height:28px}
+  .login-card h2{font-family:'Playfair Display',serif;color:var(--navy);font-size:25px;text-align:center;margin-bottom:5px}
+  .login-card .sub{text-align:center;color:var(--muted);font-size:13.5px;margin-bottom:26px}
+  .login-card label{font-size:12.5px;font-weight:600;display:block;margin-bottom:6px}
+  .login-card input{width:100%;font-family:'Inter';font-size:15px;background:var(--bg);border:1.5px solid var(--line-2);border-radius:10px;padding:13px 15px;margin-bottom:14px;transition:.15s}
+  .login-card input:focus{outline:none;border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px var(--blue-bg)}
+  .login-card .code-in{letter-spacing:8px;text-align:center;font-size:22px;font-weight:700}
+  .lbtn{width:100%;background:var(--navy);color:#fff;border:none;font-family:'Inter';font-weight:600;font-size:15px;padding:13px;border-radius:10px;cursor:pointer;transition:.15s;display:flex;align-items:center;justify-content:center;gap:8px}
+  .lbtn:hover{background:var(--navy-d)}.lbtn:disabled{opacity:.6;cursor:default}
+  .lmsg{font-size:13px;text-align:center;margin-top:14px;min-height:18px}
+  .lmsg.err{color:var(--red)}.lmsg.ok{color:var(--green)}
+  .lback{display:block;text-align:center;margin-top:16px;color:var(--muted);font-size:12.5px;cursor:pointer;background:none;border:none;width:100%}
+  .spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* APP */
+  #app{display:none}
+  .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:15px 16px;position:relative;overflow:hidden}
+  .stat::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+  .stat.pend::before{background:var(--amber)}.stat.esc::before{background:var(--violet)}
+  .stat.appr::before{background:var(--green)}.stat.bill::before{background:var(--blue)}.stat.rej::before{background:var(--red)}
+  .stat .k{font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  .stat .v{font-family:'Playfair Display',serif;font-weight:800;font-size:25px;color:var(--navy);margin-top:4px}
+
+  .toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:20px}
+  .search{flex:1;min-width:200px;position:relative}
+  .search input{width:100%;font-family:'Inter';font-size:14px;background:#fff;border:1.5px solid var(--line-2);border-radius:10px;padding:11px 13px 11px 38px}
+  .search input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-bg)}
+  .search svg{position:absolute;left:13px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--muted)}
+  .seg{display:flex;gap:4px;background:#fff;border:1px solid var(--line);padding:4px;border-radius:10px;flex-wrap:wrap}
+  .seg button{border:none;background:none;font-family:'Inter';font-weight:600;font-size:12.5px;color:var(--muted);padding:8px 13px;border-radius:7px;cursor:pointer;transition:.15s;white-space:nowrap}
+  .seg button.active{background:var(--navy);color:#fff}
+  .seg button .c{opacity:.6;font-weight:700;margin-left:3px}
+  .refresh{background:#fff;border:1.5px solid var(--line-2);color:var(--navy);font-family:'Inter';font-weight:600;font-size:13px;padding:10px 15px;border-radius:10px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+  .refresh:hover{border-color:var(--navy)}
+  .refresh svg{width:15px;height:15px}
+
+  .focus-banner{border-radius:12px;padding:13px 18px;font-size:13px;margin-bottom:18px;display:flex;gap:10px;align-items:center}
+  .focus-banner.approver{background:var(--amber-bg);color:#8a6410}
+  .focus-banner.owner{background:var(--violet-bg);color:#5a4288}
+  .focus-banner.controller{background:var(--green-bg);color:#1f7a4f}
+  .focus-banner svg{width:18px;height:18px;flex-shrink:0}
+
+  .inv{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:13px;overflow:hidden;box-shadow:var(--shadow);transition:.18s}
+  .inv:hover{box-shadow:var(--shadow-lg)}
+  .inv-head{display:flex;align-items:center;gap:15px;padding:17px 20px;cursor:pointer}
+  .who2{display:flex;align-items:center;gap:13px;flex:1;min-width:0}
+  .avatar{width:42px;height:42px;border-radius:11px;background:linear-gradient(135deg,var(--navy),var(--navy-l));color:#fff;font-weight:700;font-size:15px;display:grid;place-items:center;flex-shrink:0}
+  .meta{min-width:0}.meta .nm{font-weight:700;font-size:15px}.meta .sub{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .right{display:flex;align-items:center;gap:14px;flex-shrink:0}
+  .money{font-family:'Playfair Display',serif;font-weight:800;font-size:21px;color:var(--navy)}
+  .pill{font-size:11px;font-weight:700;padding:5px 11px;border-radius:20px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+  .pill.pending{background:var(--amber-bg);color:#9a710f}
+  .pill.escalated{background:var(--violet-bg);color:#5a4288}
+  .pill.approved{background:var(--green-bg);color:#1f7a4f}
+  .pill.billed{background:var(--blue-bg);color:#1e527f}
+  .pill.rejected{background:var(--red-bg);color:#b0331f}
+  .ftag{font-size:10px;font-weight:700;color:#fff;background:var(--red);padding:3px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.4px}
+  .chev{width:20px;height:20px;color:var(--muted);transition:.2s}
+  .inv.open .chev{transform:rotate(180deg)}
+
+  .inv-body{display:none;border-top:1px solid var(--line)}
+  .inv.open .inv-body{display:block;animation:fade .25s}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  .dgrid{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--line)}
+  .dgrid .d{padding:14px 20px;border-right:1px solid var(--line)}.dgrid .d:nth-child(3n){border-right:none}
+  .dk{font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  .dv{font-size:14px;font-weight:600;margin-top:3px;word-break:break-word}
+  .lines-tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  .lines-tbl th{text-align:left;padding:10px 20px;background:var(--bg);color:var(--muted);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--line)}
+  .lines-tbl th.r,.lines-tbl td.r{text-align:right}
+  .lines-tbl td{padding:10px 20px;border-bottom:1px solid var(--line)}.lines-tbl tr:last-child td{border-bottom:none}
+  .lines-tbl tfoot td{font-weight:700;color:var(--navy);background:var(--bg)}
+  .pad{padding:16px 20px}
+  .mini-lbl{font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;display:block}
+  .files{display:flex;flex-wrap:wrap;gap:8px}
+  .filechip{display:inline-flex;align-items:center;gap:7px;background:var(--blue-bg);border:1px solid #cfe0f1;color:var(--navy);font-size:12.5px;font-weight:600;padding:8px 13px;border-radius:8px;text-decoration:none;transition:.15s}
+  .filechip:hover{background:#dceaf7}.filechip svg{width:14px;height:14px}
+  .filechip.inv-file{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .notes-box{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:11px 13px;font-size:13.5px}
+  .trail{font-size:12.5px;color:var(--muted);padding:0 20px 4px}
+  .trail b{color:var(--ink)}
+
+  .actbar{display:flex;gap:10px;align-items:center;padding:16px 20px;background:var(--bg);border-top:1px solid var(--line);flex-wrap:wrap}
+  .actbar input{flex:1;min-width:170px;font-family:'Inter';font-size:13.5px;background:#fff;border:1.5px solid var(--line-2);border-radius:9px;padding:10px 12px}
+  .actbar input:focus{outline:none;border-color:var(--blue)}
+  .b{font-family:'Inter';font-weight:600;font-size:13.5px;padding:10px 18px;border-radius:9px;cursor:pointer;border:none;transition:.15s;display:inline-flex;align-items:center;gap:6px}
+  .b-green{background:var(--green);color:#fff}.b-green:hover{background:#27885b}
+  .b-violet{background:var(--violet);color:#fff}.b-violet:hover{background:#6a4ea0}
+  .b-blue{background:var(--blue);color:#fff}.b-blue:hover{background:#285f99}
+  .b-ghost{background:#fff;border:1.5px solid var(--line-2);color:var(--navy)}.b-ghost:hover{border-color:var(--navy)}
+  .b-red{background:#fff;border:1.5px solid #e8c0b7;color:var(--red)}.b-red:hover{background:var(--red-bg)}
+  .b:disabled{opacity:.5;cursor:default}
+
+  .empty{text-align:center;padding:60px 24px;color:var(--muted)}
+  .empty svg{width:52px;height:52px;color:var(--line-2);margin-bottom:14px}
+  .empty h3{font-family:'Playfair Display',serif;color:var(--navy);font-size:19px;margin-bottom:6px}
+  .empty p{font-size:13.5px;max-width:340px;margin:0 auto}
+
+  .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(140%);background:var(--navy);color:#fff;padding:14px 24px;border-radius:11px;font-weight:600;font-size:14px;box-shadow:var(--shadow-lg);z-index:99;transition:transform .35s cubic-bezier(.2,.9,.3,1.2);max-width:90vw;text-align:center}
+  .toast.show{transform:translateX(-50%) translateY(0)}.toast.ok{background:var(--green)}.toast.warn{background:var(--amber);color:#523c08}.toast.err{background:var(--red)}
+  footer{text-align:center;color:var(--muted);font-size:12px;margin-top:34px}footer b{color:var(--navy);font-family:'Playfair Display',serif}
+  @media(max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}.dgrid{grid-template-columns:1fr}.dgrid .d{border-right:none}.hd-inner{justify-content:center;text-align:center}}
+</style>
+</head>
+<body>
+
+<!-- ===== LOGIN ===== -->
+<div id="login">
+  <div class="login-card">
+    <div class="lg"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg></div>
+    <h2>Invoice Review</h2>
+    <p class="sub">Limitless Lights &amp; Sound · staff sign-in</p>
+
+    <div id="step-email">
+      <label>Your work email</label>
+      <input id="emailIn" type="email" placeholder="you@limitlesslightsandsound.com" autocomplete="email">
+      <button class="lbtn" id="sendCodeBtn">Email me a sign-in code</button>
+    </div>
+
+    <div id="step-code" style="display:none">
+      <label>Enter the 6-digit code sent to <span id="emailEcho" style="color:var(--navy)"></span></label>
+      <input id="codeIn" class="code-in" inputmode="numeric" maxlength="6" placeholder="000000">
+      <button class="lbtn" id="verifyBtn">Sign in</button>
+      <button class="lback" id="backBtn">← Use a different email</button>
+    </div>
+
+    <div class="lmsg" id="lmsg"></div>
+  </div>
+</div>
+
+<!-- ===== APP ===== -->
+<div id="app">
+  <header>
+    <div class="hd-inner">
+      <div class="brand">
+        <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg></div>
+        <div><h1>Invoice Review Queue</h1><p>Limitless Lights &amp; Sound</p></div>
+      </div>
+      <div class="me">
+        <div class="who"><div class="n" id="meName">—</div><div class="r" id="meRole">—</div></div>
+        <div class="av" id="meAv">—</div>
+        <button class="logout" id="logoutBtn">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="focus-banner" id="focusBanner" style="display:none"></div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="toolbar">
+      <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg><input id="search" placeholder="Search contractor, job, or PM…"></div>
+      <div class="seg" id="filter"></div>
+      <button class="refresh" id="refreshBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.8-3.4L23 10M1 14l4.7 4.4A9 9 0 0 0 20.5 15"/></svg>Refresh</button>
+    </div>
+
+    <div id="list"></div>
+    <footer>Powered by <b>Limitless</b> · Approved invoices flow to the “Approved” sheet for billing</footer>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   CONFIG — same Web App /exec URL as index.html:
+   ============================================================ */
+const API = 'PASTE_YOUR_WEB_APP_URL_HERE';
+
+const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
+const LS='lls_invoice_session';
+let SESSION=null, INVOICES=[], FILTER='focus', SEARCH='';
+
+const money=n=>'$'+(Number(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const moneyShort=n=>'$'+Math.round(Number(n)||0).toLocaleString('en-US');
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const initials=n=>(n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+const fmtDate=s=>s?new Date(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
+const fmtDateTime=s=>s?new Date(s).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+function toast(m,t){const e=$('#toast');e.textContent=m;e.className='toast show '+(t||'');clearTimeout(e._t);e._t=setTimeout(()=>e.className='toast',3600);}
+
+/* text/plain POST, token in body — no preflight */
+async function api(payload){
+  const r=await fetch(API,{method:'POST',body:JSON.stringify(payload)});
+  return r.json();
+}
+
+/* ---------- LOGIN ---------- */
+let pendingEmail='';
+$('#sendCodeBtn').onclick=async()=>{
+  const email=$('#emailIn').value.trim().toLowerCase();
+  if(!email||email.indexOf('@')<0){msg('Enter a valid email','err');return;}
+  if(API.indexOf('PASTE_')===0){msg('Backend URL not set yet (see SETUP)','err');return;}
+  const b=$('#sendCodeBtn');b.disabled=true;b.innerHTML='<span class="spin"></span> Sending…';
+  try{
+    const res=await api({action:'requestCode',email});
+    if(res&&res.ok){pendingEmail=email;$('#emailEcho').textContent=email;$('#step-email').style.display='none';$('#step-code').style.display='block';msg('Code sent — check your inbox','ok');$('#codeIn').focus();}
+    else msg((res&&res.error)||'Could not send code','err');
+  }catch(e){msg('Network error — check the backend URL','err');}
+  b.disabled=false;b.textContent='Email me a sign-in code';
+};
+$('#verifyBtn').onclick=async()=>{
+  const code=$('#codeIn').value.trim();
+  if(code.length<6){msg('Enter the 6-digit code','err');return;}
+  const b=$('#verifyBtn');b.disabled=true;b.innerHTML='<span class="spin"></span> Verifying…';
+  try{
+    const res=await api({action:'verifyCode',email:pendingEmail,code});
+    if(res&&res.ok){SESSION={token:res.token,role:res.role,name:res.name,email:res.email};localStorage.setItem(LS,JSON.stringify(SESSION));enterApp();}
+    else msg((res&&res.error)||'Sign-in failed','err');
+  }catch(e){msg('Network error','err');}
+  b.disabled=false;b.textContent='Sign in';
+};
+$('#backBtn').onclick=()=>{$('#step-code').style.display='none';$('#step-email').style.display='block';msg('','');};
+$('#codeIn').addEventListener('keydown',e=>{if(e.key==='Enter')$('#verifyBtn').click();});
+$('#emailIn').addEventListener('keydown',e=>{if(e.key==='Enter')$('#sendCodeBtn').click();});
+function msg(t,c){const e=$('#lmsg');e.textContent=t;e.className='lmsg '+(c||'');}
+
+$('#logoutBtn').onclick=()=>{localStorage.removeItem(LS);location.reload();};
+
+/* ---------- ROLE CONFIG ---------- */
+const ROLE_LABEL={owner:'Owner',approver:'Approver',controller:'Accountant'};
+const FILTERS={
+  approver:[['focus','To review'],['escalated','Escalated'],['approved','Approved'],['rejected','Rejected'],['all','All']],
+  owner:[['focus','Escalated to me'],['pending','Pending (Tony)'],['approved','Approved'],['billed','Billed'],['rejected','Rejected'],['all','All']],
+  controller:[['focus','Ready to bill'],['billed','Billed']]
+};
+const FOCUS_STATUS={approver:'pending',owner:'escalated',controller:'approved'};
+const FOCUS_TEXT={
+  approver:'First-stage review. Approve to send straight to billing, or escalate to Dash if it needs a second look.',
+  owner:'These were escalated by Tony and need your decision.',
+  controller:'These are fully approved and ready for you to create the bill, then mark as billed.'
+};
+
+/* ---------- ENTER APP ---------- */
+function enterApp(){
+  $('#login').style.display='none';
+  $('#app').style.display='block';
+  $('#meName').textContent=SESSION.name;
+  $('#meRole').textContent=ROLE_LABEL[SESSION.role]||SESSION.role;
+  $('#meAv').textContent=initials(SESSION.name);
+  // build filter tabs for this role
+  FILTER='focus';
+  $('#filter').innerHTML=FILTERS[SESSION.role].map((f,i)=>`<button class="${i===0?'active':''}" data-f="${f[0]}">${f[1]}<span class="c" data-count="${f[0]}"></span></button>`).join('');
+  $$('#filter button').forEach(btn=>btn.onclick=()=>{$$('#filter button').forEach(x=>x.classList.remove('active'));btn.classList.add('active');FILTER=btn.dataset.f;render();});
+  // focus banner
+  const fb=$('#focusBanner');fb.style.display='flex';fb.className='focus-banner '+SESSION.role;
+  fb.innerHTML=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01" stroke-linecap="round"/></svg><div>${FOCUS_TEXT[SESSION.role]}</div>`;
+  load();
+}
+$('#search').oninput=function(){SEARCH=this.value.toLowerCase();render();};
+$('#refreshBtn').onclick=load;
+
+/* ---------- LOAD ---------- */
+async function load(){
+  const res=await api({action:'list',token:SESSION.token});
+  if(!res||!res.ok){
+    if(res&&/signed in/i.test(res.error||'')){localStorage.removeItem(LS);location.reload();return;}
+    toast((res&&res.error)||'Could not load invoices','err');return;
+  }
+  INVOICES=res.invoices||[];
+  render();
+}
+
+/* ---------- RENDER ---------- */
+function statusList(s){return INVOICES.filter(i=>i.status===s);}
+function render(){
+  // stats
+  const cnt={pending:statusList('pending').length,escalated:statusList('escalated').length,approved:statusList('approved').length,billed:statusList('billed').length,rejected:statusList('rejected').length};
+  const pendVal=[...statusList('pending'),...statusList('escalated')].reduce((s,i)=>s+i.amount,0);
+  const apprVal=statusList('approved').reduce((s,i)=>s+i.amount,0);
+  if(SESSION.role==='controller'){
+    $('#stats').style.gridTemplateColumns='repeat(2,1fr)';
+    $('#stats').innerHTML=`
+      <div class="stat appr"><div class="k">Ready to bill</div><div class="v">${cnt.approved}</div></div>
+      <div class="stat bill"><div class="k">Billed</div><div class="v">${cnt.billed}</div></div>
+      <div class="stat appr" style="grid-column:span 2"><div class="k">Approved value awaiting billing</div><div class="v">${moneyShort(apprVal)}</div></div>`;
+  }else{
+    $('#stats').innerHTML=`
+      <div class="stat pend"><div class="k">Pending</div><div class="v">${cnt.pending}</div></div>
+      <div class="stat esc"><div class="k">Escalated</div><div class="v">${cnt.escalated}</div></div>
+      <div class="stat appr"><div class="k">Approved</div><div class="v">${cnt.approved}</div></div>
+      <div class="stat bill"><div class="k">Billed</div><div class="v">${cnt.billed}</div></div>
+      <div class="stat rej"><div class="k">Open value</div><div class="v">${moneyShort(pendVal)}</div></div>`;
+  }
+  // filter tab counts
+  $$('#filter [data-count]').forEach(el=>{
+    const f=el.dataset.count;let n;
+    if(f==='focus')n=statusList(FOCUS_STATUS[SESSION.role]).length;
+    else if(f==='all')n=INVOICES.length;
+    else n=statusList(f).length;
+    el.textContent=n?` ${n}`:'';
+  });
+
+  // which set to show
+  let show;
+  if(FILTER==='focus')show=statusList(FOCUS_STATUS[SESSION.role]);
+  else if(FILTER==='all')show=INVOICES.slice();
+  else show=statusList(FILTER);
+  if(SEARCH)show=show.filter(i=>(i.contractor+' '+i.job+' '+i.pm+' '+(i.company||'')+' '+i.id).toLowerCase().includes(SEARCH));
+
+  const list=$('#list');
+  if(!show.length){
+    list.innerHTML=`<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      <h3>Nothing here</h3><p>${INVOICES.length?'No invoices match this view.':'No invoices have been submitted yet.'}</p></div>`;
+    return;
+  }
+  list.innerHTML=show.map(card).join('');
+  wire();
+}
+
+const ETYPE={file:'Uploaded invoice',hours:'Hours & rate',flat:'Flat amount'};
+function card(inv){
+  const sub=`${esc(inv.job)} · PM ${esc(inv.pm)} · ${fmtDate(inv.submitted)} · ${esc(inv.id)}`;
+  // body: amount detail
+  let detail='';
+  if(inv.entryType==='hours'&&inv.lineItems&&inv.lineItems.length){
+    detail=`<table class="lines-tbl"><thead><tr><th>Description</th><th class="r">Hours</th><th class="r">Rate</th><th class="r">Total</th></tr></thead><tbody>`+
+      inv.lineItems.map(l=>`<tr><td>${esc(l.desc)||'—'}</td><td class="r">${l.hours}</td><td class="r">${money(l.rate)}</td><td class="r">${money(l.total)}</td></tr>`).join('')+
+      `</tbody><tfoot><tr><td colspan="3">Total</td><td class="r">${money(inv.amount)}</td></tr></tfoot></table>`;
+  }else if(inv.description){
+    detail=`<div class="pad"><span class="mini-lbl">Description</span><div class="notes-box">${esc(inv.description)}</div></div>`;
+  }
+  // files
+  let files='';
+  const chips=[];
+  if(inv.invoiceFileUrl)chips.push(`<a class="filechip inv-file" href="${inv.invoiceFileUrl}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Invoice file</a>`);
+  (inv.receiptUrls||[]).forEach((u,i)=>chips.push(`<a class="filechip" href="${u}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Receipt ${i+1}</a>`));
+  if(chips.length)files=`<div class="pad"><span class="mini-lbl">Attachments</span><div class="files">${chips.join('')}</div></div>`;
+  let notes=inv.notes?`<div class="pad"><span class="mini-lbl">Contractor notes</span><div class="notes-box">${esc(inv.notes)}</div></div>`:'';
+  // audit trail
+  let trail='';
+  if(inv.stage1&&inv.stage1.by)trail+=`<div class="trail">Stage 1: <b>${esc(inv.stage1.by)}</b> · ${fmtDateTime(inv.stage1.at)}${inv.stage1.note?` — “${esc(inv.stage1.note)}”`:''}</div>`;
+  if(inv.stage2&&inv.stage2.by)trail+=`<div class="trail">Stage 2: <b>${esc(inv.stage2.by)}</b> · ${fmtDateTime(inv.stage2.at)}${inv.stage2.note?` — “${esc(inv.stage2.note)}”`:''}</div>`;
+  if(inv.billed&&inv.billed.by)trail+=`<div class="trail">Billed: <b>${esc(inv.billed.by)}</b> · ${fmtDateTime(inv.billed.at)}${inv.billed.ref?` · ref ${esc(inv.billed.ref)}`:''}</div>`;
+  if(trail)trail=`<div style="padding:12px 0 4px">${trail}</div>`;
+
+  return `<div class="inv" data-id="${inv.id}">
+    <div class="inv-head" data-toggle>
+      <div class="who2">
+        <div class="avatar">${initials(inv.contractor)}</div>
+        <div class="meta"><div class="nm">${esc(inv.contractor)}${inv.company?` <span style="color:var(--muted);font-weight:500">· ${esc(inv.company)}</span>`:''}</div><div class="sub">${sub}</div></div>
+      </div>
+      <div class="right">
+        ${inv.invoiceFileUrl?'<span class="ftag">file</span>':''}
+        <span class="money">${money(inv.amount)}</span>
+        <span class="pill ${inv.status}">${pillText(inv.status)}</span>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+    </div>
+    <div class="inv-body">
+      <div class="dgrid">
+        <div class="d"><div class="dk">Email</div><div class="dv">${esc(inv.email)}</div></div>
+        <div class="d"><div class="dk">Phone</div><div class="dv">${esc(inv.phone)||'—'}</div></div>
+        <div class="d"><div class="dk">Work date(s)</div><div class="dv">${esc(inv.workDate)}</div></div>
+        <div class="d"><div class="dk">Entry type</div><div class="dv">${ETYPE[inv.entryType]||inv.entryType}</div></div>
+        <div class="d"><div class="dk">Invoice / ref #</div><div class="dv">${esc(inv.invoiceNo)||'—'}</div></div>
+        <div class="d"><div class="dk">Amount</div><div class="dv">${money(inv.amount)}</div></div>
+      </div>
+      ${detail}${files}${notes}${trail}
+      ${actionBar(inv)}
+    </div>
+  </div>`;
+}
+function pillText(s){return {pending:'Awaiting Tony',escalated:'Escalated',approved:'Approved',billed:'Billed',rejected:'Rejected'}[s]||s;}
+
+function actionBar(inv){
+  const r=SESSION.role,s=inv.status,id=inv.id;
+  const note=`<input class="note" data-id="${id}" placeholder="Reason / note (optional)">`;
+  let btns='';
+  if(r==='approver'&&s==='pending'){
+    btns=`${note}<button class="b b-green" data-act="approve" data-id="${id}">✓ Approve</button>
+      <button class="b b-violet" data-act="escalate" data-id="${id}">↑ Escalate to Dash</button>
+      <button class="b b-red" data-act="reject" data-id="${id}">✕ Reject</button>`;
+  }else if(r==='owner'){
+    if(s==='escalated'||s==='pending'){
+      btns=`${note}<button class="b b-green" data-act="approve" data-id="${id}">✓ Approve</button>
+        ${s==='escalated'?`<button class="b b-ghost" data-act="reopen" data-id="${id}">↩ Send back to Tony</button>`:''}
+        <button class="b b-red" data-act="reject" data-id="${id}">✕ Reject</button>`;
+    }else if(s==='approved'){
+      btns=`${note}<button class="b b-red" data-act="reject" data-id="${id}">✕ Reject</button>`;
+    }else if(s==='rejected'){
+      btns=`<button class="b b-ghost" data-act="reopen" data-id="${id}">↩ Reopen</button>`;
+    }
+  }else if(r==='controller'&&s==='approved'){
+    btns=`<input class="billref" data-id="${id}" placeholder="Bill reference (e.g. bill #)" style="flex:1;min-width:170px;font-family:Inter;font-size:13.5px;background:#fff;border:1.5px solid var(--line-2);border-radius:9px;padding:10px 12px">
+      <button class="b b-blue" data-act="billed" data-id="${id}">✓ Mark billed</button>`;
+  }
+  if(!btns)return '';
+  return `<div class="actbar">${btns}</div>`;
+}
+
+function wire(){
+  // expand/collapse (ignore clicks on links inside the header)
+  $$('#list .inv-head[data-toggle]').forEach(h=>h.onclick=e=>{if(e.target.closest('a'))return;h.parentElement.classList.toggle('open');});
+
+  // action buttons: routing field is `action:'act'`, the verb is sent as `verb`
+  $$('#list [data-act]').forEach(btn=>btn.onclick=async e=>{
+    e.stopPropagation();
+    const id=btn.dataset.id, act=btn.dataset.act;
+    const note   = document.querySelector(`.note[data-id="${id}"]`)?.value.trim()||'';
+    const billRef= document.querySelector(`.billref[data-id="${id}"]`)?.value.trim()||'';
+    if(act==='reject' && !confirm('Reject this invoice? The contractor will need to resubmit.')) return;
+    if(act==='reopen' && !confirm('Send this invoice back into the queue?')) return;
+
+    const bar=btn.closest('.actbar');
+    bar.querySelectorAll('button').forEach(b=>b.disabled=true);
+    try{
+      const res=await api({action:'act', verb:act, token:SESSION.token, id, note, billRef});
+      if(res && res.ok){
+        const labels={approve:'Approved',escalate:'Escalated to Dash',reject:'Rejected',billed:'Marked billed',reopen:'Reopened'};
+        toast(labels[act]||'Done','ok');
+        load();
+      }else{
+        if(res && /signed in/i.test(res.error||'')){ localStorage.removeItem(LS); location.reload(); return; }
+        toast((res&&res.error)||'Action failed','err');
+        bar.querySelectorAll('button').forEach(b=>b.disabled=false);
+      }
+    }catch(err){
+      toast('Network error — try again','err');
+      bar.querySelectorAll('button').forEach(b=>b.disabled=false);
+    }
+  });
+}
+
+/* ---------- BOOT: resume an existing session on reload ---------- */
+(function(){
+  try{
+    const saved=localStorage.getItem(LS);
+    if(saved){ SESSION=JSON.parse(saved); enterApp(); }
+  }catch(e){ localStorage.removeItem(LS); }
+})();
+</script>
+</body>
+</html>
