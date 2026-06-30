@@ -32,6 +32,9 @@
   .sec-head{font-family:'Playfair Display',serif;font-weight:700;font-size:19px;color:var(--navy);display:flex;align-items:center;gap:11px;margin-bottom:4px}
   .sec-num{width:26px;height:26px;border-radius:7px;background:var(--navy);color:#fff;font-family:'Inter';font-weight:700;font-size:13px;display:grid;place-items:center;flex-shrink:0}
   .sec-sub{color:var(--muted);font-size:13px;margin:0 0 18px 37px}
+  .notice{background:var(--blue-bg);border:1px solid #cfe0f1;border-left:4px solid var(--blue);border-radius:12px;padding:15px 18px;margin-bottom:22px;font-size:13.5px;line-height:1.55;color:var(--ink);display:flex;gap:12px;align-items:flex-start}
+  .notice svg{width:20px;height:20px;color:var(--blue);flex-shrink:0;margin-top:1px}
+  .notice b{color:var(--navy);font-weight:700}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 18px}
   .field{display:flex;flex-direction:column;gap:6px}.field.full{grid-column:1/-1}
   label{font-size:12.5px;font-weight:600;color:var(--ink)}label .req{color:var(--red);margin-left:2px}
@@ -98,6 +101,10 @@
 </header>
 
 <div class="wrap">
+  <div class="notice">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+    <div>All invoices are paid <b>Net 15</b> from a correct submission. Disputed or incorrect submissions will need to be <b>resubmitted</b> and may cause delays — please double-check your details before sending.</div>
+  </div>
   <form id="f">
     <div class="card">
       <div class="sec-head"><span class="sec-num">1</span> Your details &amp; the job</div>
@@ -107,9 +114,9 @@
         <div class="field"><label>Company / trading name <span class="hint">(optional)</span></label><input name="company" placeholder="If invoicing as a business"></div>
         <div class="field"><label>Email<span class="req">*</span></label><input name="email" type="email" required placeholder="you@email.com"></div>
         <div class="field"><label>Phone <span class="hint">(optional)</span></label><input name="phone" placeholder="(555) 000-0000"></div>
-        <div class="field"><label>Job / event name<span class="req">*</span></label><input name="job" required placeholder="e.g. Q3 Gala — Hilton Ballroom"></div>
+        <div class="field"><label>Job #<span class="req">*</span></label><input name="job" required placeholder="As listed on the gig in your Lasso app"></div>
         <div class="field"><label>Project Manager<span class="req">*</span></label>
-          <select name="pm" required><option value="">Select PM…</option><option>Tony</option><option>Robbie</option><option>Dash</option><option value="__other__">Other (type below)</option></select>
+          <select name="pm" required><option value="">Select PM…</option><option>Dash Speer</option><option>Robby Wall</option><option>Austin Tingle</option><option>Sean Pauw</option><option>Jake Stigliano</option><option>Wilmar Bermudez</option><option>Alex Figeuroa</option><option value="__other__">Other (type below)</option></select>
         </div>
         <div class="field" id="pmOtherWrap" style="display:none"><label>PM name</label><input name="pmOther" placeholder="Enter PM name"></div>
         <div class="field"><label>Work date(s)<span class="req">*</span></label><input name="workDate" required placeholder="e.g. June 3–5, 2026"></div>
@@ -118,14 +125,13 @@
 
     <div class="card">
       <div class="sec-head"><span class="sec-num">2</span> The invoice</div>
-      <p class="sec-sub">Upload your own invoice, or enter hours / a flat amount — whichever you have.</p>
+      <p class="sec-sub">Enter your hours &amp; rate, or upload your own invoice — whichever you have.</p>
       <div class="mode-row">
-        <button type="button" class="mode-btn active" data-mode="file">📎 Upload my invoice</button>
-        <button type="button" class="mode-btn" data-mode="hours">⏱ Enter hours &amp; rate</button>
-        <button type="button" class="mode-btn" data-mode="flat">$ Flat amount</button>
+        <button type="button" class="mode-btn active" data-mode="hours">⏱ Enter hours &amp; rate</button>
+        <button type="button" class="mode-btn" data-mode="file">📎 Upload my invoice</button>
       </div>
 
-      <div id="m-file" style="padding:0 30px">
+      <div id="m-file" style="display:none;padding:0 30px">
         <div class="drop" id="dropZone">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
           <div class="big">Drop your invoice here, or click to browse</div>
@@ -139,18 +145,10 @@
         </div>
       </div>
 
-      <div id="m-hours" style="display:none;padding:0 30px">
+      <div id="m-hours" style="padding:0 30px">
         <div class="lines" id="lineItems"></div>
         <button type="button" class="add-line" id="addLine">+ Add another line</button>
         <div class="total-bar"><span class="lbl">Total invoice amount</span><span class="amt" id="hoursTotal">$0.00</span></div>
-      </div>
-
-      <div id="m-flat" style="display:none;padding:0 30px">
-        <div class="grid">
-          <div class="field"><label>Invoice total ($)<span class="req">*</span></label><input name="amountFlat" type="number" min="0" step="0.01" placeholder="0.00"></div>
-          <div class="field"><label>Reference # <span class="hint">(optional)</span></label><input name="invoiceNoFlat" placeholder="e.g. 2041"></div>
-          <div class="field full"><label>Description of work<span class="req">*</span></label><textarea name="descFlat" placeholder="Brief description of services provided…"></textarea></div>
-        </div>
       </div>
     </div>
 
@@ -209,10 +207,10 @@ function toB64(file){return new Promise((res,rej)=>{const rd=new FileReader();rd
 
 $('select[name=pm]').onchange=function(){$('#pmOtherWrap').style.display=this.value==='__other__'?'flex':'none';};
 
-let mode='file';
+let mode='hours';
 $$('.mode-btn').forEach(b=>b.onclick=()=>{
   $$('.mode-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;
-  ['file','hours','flat'].forEach(m=>$('#m-'+m).style.display=(m===mode?'block':'none'));
+  ['file','hours'].forEach(m=>$('#m-'+m).style.display=(m===mode?'block':'none'));
 });
 
 let invFile=null;
@@ -266,14 +264,10 @@ $('#f').addEventListener('submit',async e=>{
     if(!invFile){toast('Please attach your invoice file','err');return;}
     amount=+g('amountFile')||0; invoiceNo=g('invoiceNoFile');
     if(amount<=0){toast('Enter the invoice total','err');return;}
-  }else if(mode==='hours'){
+  }else{
     lineItems=[];
     $$('#lineItems .line').forEach(l=>{const dsc=l.querySelector('.li-desc').value.trim(),h=+l.querySelector('.li-hrs').value||0,r=+l.querySelector('.li-rate').value||0;if(h||r||dsc){lineItems.push({desc:dsc,hours:h,rate:r,total:h*r});amount+=h*r;}});
     if(amount<=0){toast('Add at least one line with hours & rate','err');return;}
-  }else{
-    amount=+g('amountFlat')||0; invoiceNo=g('invoiceNoFlat'); description=g('descFlat');
-    if(amount<=0){toast('Enter the invoice total','err');return;}
-    if(!description){toast('Add a description of the work','err');return;}
   }
   if(!g('contractor')||!g('email')||!g('job')||!pm||!g('workDate')){toast('Please fill the required fields in section 1','err');return;}
 
