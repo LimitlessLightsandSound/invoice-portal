@@ -54,7 +54,7 @@ const MAX_FILE_MB       = 10;     // per uploaded file
 /***** FIREBASE AUTH (used by the CRM invoices console) *****/
 // Web API key from your Firebase project: Project settings > General > "Web API key".
 // This is PUBLIC by design — it only lets the backend VALIDATE ID tokens for this one project.
-const FIREBASE_API_KEY = 'PASTE_FIREBASE_WEB_API_KEY';
+const FIREBASE_API_KEY = 'AIzaSyCkLXrpphHLsxcwQTTeylDMFlh-OGE31lE';
 
 /***** TABS *****/
 const PRODUCTIONS_TAB = 'Productions';
