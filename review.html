@@ -49,10 +49,18 @@
   .login-card .code-in{letter-spacing:8px;text-align:center;font-size:22px;font-weight:700}
   .lbtn{width:100%;background:var(--navy);color:#fff;border:none;font-family:'Inter';font-weight:600;font-size:15px;padding:13px;border-radius:10px;cursor:pointer;transition:.15s;display:flex;align-items:center;justify-content:center;gap:8px}
   .lbtn:hover{background:var(--navy-d)}.lbtn:disabled{opacity:.6;cursor:default}
+  .gbtn{width:100%;background:#fff;color:#3c4043;border:1.5px solid var(--line-2);font-family:'Inter';font-weight:600;font-size:15px;padding:12px;border-radius:10px;cursor:pointer;transition:.15s;display:flex;align-items:center;justify-content:center;gap:10px}
+  .gbtn:hover{background:var(--bg);border-color:var(--line);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .gbtn:disabled{opacity:.6;cursor:default}
+  .gbtn svg{width:18px;height:18px;flex:none}
+  .ghint{text-align:center;color:var(--muted);font-size:12px;margin-top:11px}
+  .ldiv{display:flex;align-items:center;gap:12px;margin:22px 0 4px;color:var(--muted);font-size:11.5px;letter-spacing:.04em;text-transform:uppercase}
+  .ldiv:before,.ldiv:after{content:'';flex:1;height:1px;background:var(--line-2)}
   .lmsg{font-size:13px;text-align:center;margin-top:14px;min-height:18px}
   .lmsg.err{color:var(--red)}.lmsg.ok{color:var(--green)}
   .lback{display:block;text-align:center;margin-top:16px;color:var(--muted);font-size:12.5px;cursor:pointer;background:none;border:none;width:100%}
   .spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
+  .spin.dark{border-color:rgba(0,0,0,.15);border-top-color:var(--navy)}
   @keyframes sp{to{transform:rotate(360deg)}}
 
   /* APP */
@@ -166,10 +174,21 @@
     <h2>Invoice Review</h2>
     <p class="sub">Limitless Lights &amp; Sound · staff sign-in</p>
 
+    <div id="step-google" style="display:none">
+      <button class="gbtn" id="googleBtn">
+        <svg viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.46 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+        Continue with Google
+      </button>
+      <p class="ghint">Use the same account as Limitless Pipeline</p>
+      <div class="ldiv"><span>or</span></div>
+      <button class="lback" id="showCodeBtn">Sign in with an email code instead</button>
+    </div>
+
     <div id="step-email">
       <label>Your work email</label>
       <input id="emailIn" type="email" placeholder="you@limitlesslightsandsound.com" autocomplete="email">
       <button class="lbtn" id="sendCodeBtn">Email me a sign-in code</button>
+      <button class="lback" id="showGoogleBtn" style="display:none">← Back to Google sign-in</button>
     </div>
 
     <div id="step-code" style="display:none">
@@ -223,11 +242,25 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Firebase (Google sign-in). If these fail to load, the email-code flow still works. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+
 <script>
 /* ============================================================
    CONFIG — same Web App /exec URL as index.html:
    ============================================================ */
-const API = 'PASTE_YOUR_WEB_APP_URL_HERE';
+const API = 'https://script.google.com/macros/s/AKfycbwbQh4DBukoZqPIifvT5uUKAYwGyZBB1mg7kjgXQ9DhjR3WRjatfCZp77X_eTbzOrz-/exec';
+
+/* Firebase project behind "Limitless Pipeline". The Web API key is public by
+   design (it identifies the project, it doesn't grant access). Same key goes
+   in Code.gs as FIREBASE_API_KEY. Leave the placeholder and the Google button
+   simply hides itself, leaving the email-code flow. */
+const FIREBASE = {
+  apiKey:     'PASTE_FIREBASE_WEB_API_KEY',
+  authDomain: 'limitless-crm-336ee.firebaseapp.com',
+  projectId:  'limitless-crm-336ee'
+};
 
 const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
 const LS='lls_invoice_session';
@@ -247,7 +280,101 @@ async function api(payload){
   return r.json();
 }
 
-/* ---------- LOGIN ---------- */
+/* ---------- LOGIN: GOOGLE (Firebase) ---------- */
+/* Sign in with Google via Firebase, hand the resulting ID token to the backend,
+   which validates it against this project and swaps it for our session token. */
+const FB_READY = FIREBASE.apiKey.indexOf('PASTE_')!==0 && typeof firebase!=='undefined';
+const RDR='lls_invoice_redirecting';   // set only while a redirect sign-in is in flight
+let fbAuth=null;
+const GBTN_HTML=$('#googleBtn').innerHTML;
+
+function showStep(which){
+  $('#step-google').style.display = which==='google' ? 'block':'none';
+  $('#step-email').style.display  = which==='email'  ? 'block':'none';
+  $('#step-code').style.display   = 'none';
+  msg('','');
+}
+function gBusy(on,label){
+  const b=$('#googleBtn');b.disabled=on;
+  b.innerHTML = on ? '<span class="spin dark"></span> '+esc(label||'Working…') : GBTN_HTML;
+}
+function fbErr(e){
+  const c=(e&&e.code)||'';
+  if(c==='auth/popup-closed-by-user'||c==='auth/cancelled-popup-request') return '';
+  if(c==='auth/unauthorized-domain') return 'This site isn’t an authorized domain in Firebase Auth yet.';
+  if(c==='auth/network-request-failed') return 'Network error — try again.';
+  return (e&&e.message)||'Google sign-in failed.';
+}
+
+if(FB_READY){
+  firebase.initializeApp(FIREBASE);
+  fbAuth=firebase.auth();
+  showStep('google');
+  $('#showGoogleBtn').style.display='block';
+  /* Returning from a redirect sign-in (the popup-blocked path). Only surface an
+     error if WE started a redirect — otherwise a failure here is just noise on a
+     plain page load, not something the user did. */
+  fbAuth.getRedirectResult()
+    .then(r=>{ if(r&&r.user) exchangeIdToken(r.user); sessionStorage.removeItem(RDR); })
+    .catch(e=>{ if(sessionStorage.getItem(RDR)){ const m=fbErr(e); if(m) msg(m,'err'); } sessionStorage.removeItem(RDR); });
+}else{
+  showStep('email');
+}
+
+function googleProvider(){
+  const p=new firebase.auth.GoogleAuthProvider();
+  /* hd is a UX hint only (pre-picks the work account) — the real gate is the
+     REVIEWERS allow-list the backend checks after validating the token. */
+  p.setCustomParameters({prompt:'select_account',hd:'limitlesslightsandsound.com'});
+  return p;
+}
+
+/* Popup first — note this is the opposite of the main Pipeline app, which uses a
+   full-page redirect. Pipeline is on Firebase Hosting, same origin as authDomain,
+   where redirect is the reliable choice. This portal is on GitHub Pages, a
+   different origin, and there redirect is the one that breaks under Safari/Chrome
+   third-party storage partitioning. Redirect stays as the popup-blocked fallback. */
+
+$('#googleBtn').onclick=async()=>{
+  if(API.indexOf('PASTE_')===0){msg('Backend URL not set yet (see SETUP)','err');return;}
+  const p=googleProvider();
+  gBusy(true,'Opening Google…');
+  try{
+    const res=await fbAuth.signInWithPopup(p);
+    await exchangeIdToken(res.user);
+  }catch(e){
+    const c=(e&&e.code)||'';
+    if(c==='auth/popup-blocked'||c==='auth/operation-not-supported-in-this-environment'){
+      try{ sessionStorage.setItem(RDR,'1'); await fbAuth.signInWithRedirect(p); return; }  /* page navigates away */
+      catch(e2){ sessionStorage.removeItem(RDR); const m=fbErr(e2); if(m) msg(m,'err'); }
+    }else{
+      const m=fbErr(e); if(m) msg(m,'err');
+    }
+  }
+  gBusy(false);
+};
+
+async function exchangeIdToken(user){
+  gBusy(true,'Signing in…');
+  try{
+    const idToken=await user.getIdToken();
+    const res=await api({action:'firebaseLogin',idToken});
+    /* the ID token was only ever needed for this handoff */
+    try{ await fbAuth.signOut(); }catch(_){}
+    if(res&&res.ok){
+      SESSION={token:res.token,role:res.role,name:res.name,email:res.email,scope:res.scope||''};
+      localStorage.setItem(LS,JSON.stringify(SESSION));
+      enterApp();return;
+    }
+    msg((res&&res.error)||'Sign-in failed','err');
+  }catch(e){ msg('Network error — check the backend URL','err'); }
+  gBusy(false);
+}
+
+$('#showCodeBtn').onclick=()=>{showStep('email');$('#emailIn').focus();};
+$('#showGoogleBtn').onclick=()=>showStep('google');
+
+/* ---------- LOGIN: EMAIL CODE (fallback) ---------- */
 let pendingEmail='';
 $('#sendCodeBtn').onclick=async()=>{
   const email=$('#emailIn').value.trim().toLowerCase();

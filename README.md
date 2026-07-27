@@ -36,12 +36,34 @@ The **API URL placeholder** (`const API = 'PASTE_YOUR_WEB_APP_URL_HERE'`) appear
 ## Part 1 — Backend (Google Sheet + Apps Script)
 
 1. Open the sheet **Limitless — Contractor Invoices** (owned by dash@). **Extensions → Apps Script.**
-2. Delete the sample, paste in all of `Code.gs`. Confirm the 5 emails in `REVIEWERS` near the top.
+2. Delete the sample, paste in all of `Code.gs`. Confirm the 5 emails in `REVIEWERS` near the top, and set `FIREBASE_API_KEY` (see Part 1b).
 3. In the function dropdown choose **`setup`** → **Run**. Authorize when prompted (*Advanced → Go to project → Allow*). This builds + styles the Productions / Installs / Approved tabs and the Drive folder.
 4. **Deploy → New deployment → Web app:**
    - Execute as: **Me** (sign in as dash@ so login emails + uploaded files live under your account)
    - Who has access: **Anyone**  ← required so contractors can submit
 5. **Deploy**, then **copy the Web app URL** (ends in `/exec`).
+
+---
+
+## Part 1b — Google sign-in for the staff console
+
+Staff sign into `review.html` with **the same Google account they use for Limitless Pipeline** — no more waiting on a 6-digit code. The email-code flow is still there as a fallback (**"Sign in with an email code instead"**), and it's what shows if the Firebase key below is left unset.
+
+How it works: the browser signs in with Google via Firebase → sends the resulting ID token to Apps Script → the backend validates that token against the Pipeline Firebase project, checks the email against `REVIEWERS`, and issues the same session token everything else already uses. A Google account that isn't on the allow-list gets nothing.
+
+**To turn it on — one value in two places:**
+
+1. Firebase console → project **`limitless-crm-336ee`** → **Project settings → General → Web API key**. Copy it.
+2. Paste it into **both**:
+   - `Code.gs` → `const FIREBASE_API_KEY = '…'`
+   - `review.html` → `const FIREBASE = { apiKey: '…' }`
+
+   It's safe in the repo — a Firebase Web API key is public by design; it identifies the project, it doesn't grant access.
+3. Firebase console → **Authentication → Settings → Authorized domains** → **Add domain** → `limitlesslightsandsound.github.io` (plus `invoice.limitlesslightsandsound.com` if you set up the custom domain). **Without this, Google sign-in fails with "unauthorized domain."**
+
+Google is already enabled as a sign-in provider (Pipeline uses it), so there's nothing to turn on there.
+
+> **Popup here, redirect in Pipeline — on purpose.** Pipeline runs on Firebase Hosting, same origin as the auth domain, where a full-page redirect is the reliable option. This portal runs on GitHub Pages, a *different* origin, and that's exactly the case where Firebase's redirect flow breaks under Safari/Chrome third-party storage partitioning. So the console uses a popup, falling back to redirect only if the popup is blocked. Don't "fix" one to match the other.
 
 ---
 
@@ -76,6 +98,9 @@ Already live at:
 - **"Failed to fetch" / CORS?** The forms POST as plain text on purpose (skips the CORS preflight Apps Script can't answer). Don't add a JSON or Authorization header — the token rides in the request body.
 - **Invoice file links won't open?** The Drive folder is shared only with the five reviewer emails; the reviewer must be signed into that Google account. Files aren't public by design.
 - **Sheet not styled?** Run `restyle()` from the Apps Script editor — it re-applies the glossy theme anytime.
+- **"This site isn't an authorized domain"?** Part 1b step 3 — add the Pages domain under Firebase Authentication → Settings → Authorized domains.
+- **No "Continue with Google" button?** The `apiKey` in `review.html` is still the placeholder, so the console fell back to email codes. See Part 1b.
+- **Signed in with Google, told "not on the reviewer allow-list"?** That Google account's email isn't in `REVIEWERS` in `Code.gs`. Add it, then redeploy a new version.
 
 ---
 
