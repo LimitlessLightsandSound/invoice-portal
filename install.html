@@ -73,6 +73,12 @@
   .rcpt{display:flex;align-items:center;gap:11px;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px}
   .rcpt .nm{flex:1;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rcpt .sz{color:var(--muted);font-size:11.5px}.rcpt .x{border:none;background:none;color:var(--red);cursor:pointer;font-size:16px;padding:2px 6px}
+  .st{font-size:11.5px;font-weight:700;border:none;background:none;font-family:'Inter';padding:0}
+  .st.ok{color:var(--green)}
+  .st.err{color:var(--red);cursor:pointer;text-decoration:underline}
+  .up{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);font-weight:600}
+  .up .bar{display:block;width:54px;height:5px;border-radius:3px;background:var(--line);overflow:hidden}
+  .up .bar i{display:block;height:100%;background:var(--green);border-radius:3px;transition:width .18s}
   input[type=file]{display:none}
   .actions{display:flex;gap:12px;margin-top:24px;flex-wrap:wrap;align-items:center}
   .btn{font-family:'Inter';font-weight:600;font-size:14px;padding:13px 28px;border-radius:10px;cursor:pointer;border:none;transition:.16s;display:inline-flex;align-items:center;gap:8px}
@@ -207,6 +213,54 @@ async function api(payload){
 }
 function toB64(file){return new Promise((res,rej)=>{const rd=new FileReader();rd.onload=()=>res(rd.result.split(',')[1]);rd.onerror=rej;rd.readAsDataURL(file);});}
 
+/* Attachments upload the moment they're picked, in the background, while the
+   contractor is still filling out the rest of the form. By the time they press
+   Submit the bytes are already in Drive and submit only sends text — that's what
+   makes it return instantly instead of stalling on a multi-MB payload.
+   XHR rather than fetch because it's the only one that reports upload progress.
+   Still text/plain with no custom headers, so no CORS preflight — same rule as api(). */
+function postRaw(payload,onProgress){
+  return new Promise((res,rej)=>{
+    const x=new XMLHttpRequest();
+    x.open('POST',API,true);
+    if(onProgress&&x.upload)x.upload.onprogress=e=>{if(e.lengthComputable)onProgress(e.loaded/e.total);};
+    x.onload=()=>{try{res(JSON.parse(x.responseText));}catch(err){rej(err);}};
+    x.onerror=()=>rej(new Error('network'));
+    x.send(JSON.stringify(payload));
+  });
+}
+
+/* One attachment: {file,name,size,pct,status,fileId}. status = uploading|done|error */
+function attach(file){
+  const a={file,name:file.name,size:file.size,pct:0,status:'uploading',fileId:'',err:''};
+  uploadOne(a);
+  return a;
+}
+function uploadOne(a){
+  a.status='uploading';a.pct=0;a.err='';render();
+  a.done=(async()=>{
+    try{
+      const b64=await toB64(a.file);
+      const r=await postRaw({action:'uploadFile',file:{name:a.file.name,type:a.file.type,b64}},p=>{a.pct=p;render();});
+      if(r&&r.ok){a.status='done';a.fileId=r.fileId;a.pct=1;}
+      else{a.status='error';a.err=(r&&r.error)||'Upload failed';}
+    }catch(e){a.status='error';a.err='Upload failed';}
+    render();
+  })();
+  return a.done;
+}
+function statusHTML(a,key){
+  if(a.status==='uploading')return `<span class="up"><span class="bar"><i style="width:${Math.round(a.pct*100)}%"></i></span>${Math.round(a.pct*100)}%</span>`;
+  if(a.status==='error')return `<button type="button" class="st err" data-retry="${key}" title="${esc(a.err||'')}">Retry</button>`;
+  return `<span class="st ok">Attached</span>`;
+}
+function render(){renderInv();renderRcpts();
+  $$('[data-retry]').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.retry;const a=(k==='inv')?invFile:receipts[+k];
+    if(a)uploadOne(a);
+  });
+}
+
 $('select[name=pm]').onchange=function(){$('#pmOtherWrap').style.display=this.value==='__other__'?'flex':'none';};
 
 let mode='hours';
@@ -224,12 +278,18 @@ dz.ondrop=e=>{e.preventDefault();dz.classList.remove('drag');if(e.dataTransfer.f
 $('#invFile').onchange=function(){if(this.files[0])setInvFile(this.files[0]);};
 function setInvFile(f){
   if(f.size>10*1024*1024){toast('That file is over 10MB','warn');return;}
-  invFile=f;
-  $('#invFileBox').innerHTML=`<div class="filebox">
+  invFile=attach(f);   /* starts uploading right now */
+  render();
+}
+function renderInv(){
+  const box=$('#invFileBox');
+  if(!invFile){box.innerHTML='';return;}
+  box.innerHTML=`<div class="filebox">
     <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="#2e9e6b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
-    <span class="nm">${esc(f.name)}</span><span class="sz">${(f.size/1024).toFixed(0)} KB</span>
+    <span class="nm">${esc(invFile.name)}</span><span class="sz">${(invFile.size/1024).toFixed(0)} KB</span>
+    ${statusHTML(invFile,'inv')}
     <button type="button" class="x" id="rmInv">×</button></div>`;
-  $('#rmInv').onclick=()=>{invFile=null;$('#invFileBox').innerHTML='';$('#invFile').value='';};
+  $('#rmInv').onclick=()=>{invFile=null;$('#invFile').value='';render();};
 }
 
 function lineRow(){
@@ -263,10 +323,10 @@ $('#lineItems').appendChild(lineRow());
 
 let receipts=[];
 $('#addRcpt').onclick=()=>$('#rcptInput').click();
-$('#rcptInput').onchange=function(){[...this.files].forEach(f=>{if(f.size>10*1024*1024){toast(`"${f.name}" over 10MB — skipped`,'warn');return;}receipts.push(f);});renderRcpts();this.value='';};
+$('#rcptInput').onchange=function(){[...this.files].forEach(f=>{if(f.size>10*1024*1024){toast(`"${f.name}" over 10MB — skipped`,'warn');return;}receipts.push(attach(f));});render();this.value='';};
 function renderRcpts(){
-  $('#rcptList').innerHTML=receipts.map((r,i)=>`<div class="rcpt"><span class="nm">${esc(r.name)}</span><span class="sz">${(r.size/1024).toFixed(0)} KB</span><button type="button" class="x" data-i="${i}">×</button></div>`).join('');
-  $$('#rcptList .x').forEach(b=>b.onclick=()=>{receipts.splice(+b.dataset.i,1);renderRcpts();});
+  $('#rcptList').innerHTML=receipts.map((r,i)=>`<div class="rcpt"><span class="nm">${esc(r.name)}</span><span class="sz">${(r.size/1024).toFixed(0)} KB</span>${statusHTML(r,i)}<button type="button" class="x" data-i="${i}">×</button></div>`).join('');
+  $$('#rcptList .x').forEach(b=>b.onclick=()=>{receipts.splice(+b.dataset.i,1);render();});
 }
 
 $('#f').addEventListener('submit',async e=>{
@@ -294,14 +354,29 @@ $('#f').addEventListener('submit',async e=>{
   if(!g('contractor')||!g('email')||!g('job')||!pm){toast('Please fill the required fields in section 1','err');return;}
 
   const btn=$('#submitBtn');btn.disabled=true;
-  btn.innerHTML='<span class="spin"></span> Uploading…';
-  $('#submitHint').textContent='Sending — this can take a few seconds with attachments.';
+  btn.innerHTML='<span class="spin"></span> Submitting…';
+  $('#submitHint').textContent='';
+
+  /* Attachments started uploading when they were picked, so this is normally a
+     no-op. If one is still in flight, wait on it rather than dropping it. */
+  const active=[...((mode==='file'&&invFile)?[invFile]:[]),...receipts];
+  const inFlight=active.filter(a=>a.status==='uploading');
+  if(inFlight.length){
+    btn.innerHTML='<span class="spin"></span> Finishing upload…';
+    await Promise.all(inFlight.map(a=>a.done));
+  }
+  if(active.some(a=>a.status==='error')){
+    toast('An attachment failed to upload — tap Retry on it, then submit','err');
+    btn.disabled=false;btn.innerHTML='Submit invoice';return;
+  }
 
   try{
     const payload={action:'submit',billingType:'install',entryType,contractor:g('contractor'),company:g('company'),email:g('email'),phone:g('phone'),
       job:g('job'),pm,amount,invoiceNo,description,lineItems,notes:g('notes')};
-    if(mode==='file'&&invFile) payload.invoiceFile={name:invFile.name,type:invFile.type,b64:await toB64(invFile)};
-    if(receipts.length){payload.receipts=[];for(const r of receipts)payload.receipts.push({name:r.name,type:r.type,b64:await toB64(r)});}
+    /* Files are already in Drive — send ids, not bytes. */
+    if(mode==='file'&&invFile) payload.invoiceFileId=invFile.fileId;
+    const okRcpts=receipts.filter(r=>r.status==='done'&&r.fileId);
+    if(okRcpts.length) payload.receiptFileIds=okRcpts.map(r=>r.fileId);
 
     const res=await api(payload);
     if(res&&res.ok){

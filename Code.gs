@@ -11,12 +11,19 @@
  *   4. Deploy > New deployment > Web app:
  *        Execute as: Me
  *        Who has access: ANYONE   <-- required so contractors can submit
- *      Copy the /exec URL. Paste it into index.html, install.html, review.html (API const).
+ *      Copy the /exec URL. Paste it into index.html and install.html (API const).
  *
- * TWO FORMS, TWO TABS, TWO APPROVERS:
- *   - index.html   -> billingType 'production' -> "Productions" tab -> Tony approves
- *   - install.html -> billingType 'install'    -> "Installs"    tab -> Gabe approves
- *   Dash (owner) can act on either. Taryn & Accounting (controllers) bill both.
+ * TWO FORMS, TWO TABS:
+ *   - index.html   -> billingType 'production' -> "Productions" tab
+ *   - install.html -> billingType 'install'    -> "Installs"    tab
+ *   Review and approval happen in the Limitless CRM, not here. This backend's job
+ *   is to capture submissions into the Sheet and attachments into Drive.
+ *
+ * ATTACHMENTS ARE UPLOADED BEFORE SUBMIT:
+ *   The forms POST each file via 'uploadFile' the moment it's picked, so it lands
+ *   in Drive named PENDING-xxxx. 'submit' then claims those ids and renames them
+ *   to the invoice ID. Leftover PENDING-* files are abandoned drafts — safe to
+ *   delete. This is why submitting feels instant even with big attachments.
  *
  * CORS NOTE (do not "fix" this):
  *   Apps Script web apps cannot return CORS headers. The HTML clients POST
@@ -39,15 +46,10 @@ const REVIEWERS = {
 };
 
 const DRIVE_FOLDER_NAME = 'Limitless — Contractor Invoices';
-const CODE_TTL_MIN      = 10;     // login code validity (email-code fallback)
+const CODE_TTL_MIN      = 10;     // login code validity
 const SESSION_TTL_DAYS  = 30;     // how long a login lasts
 const MAX_CODE_ATTEMPTS = 5;      // brute-force guard
 const MAX_FILE_MB       = 10;     // per uploaded file
-
-/***** FIREBASE AUTH (staff console sign-in via "limitless pipeline") *****/
-// Web API key from your Firebase project: Project settings > General > "Web API key".
-// This is PUBLIC by design — it only lets the backend VALIDATE ID tokens for this one project.
-const FIREBASE_API_KEY = 'PASTE_FIREBASE_WEB_API_KEY';
 
 /***** TABS *****/
 const PRODUCTIONS_TAB = 'Productions';
@@ -80,9 +82,9 @@ function doPost(e){
     if (e && e.postData && e.postData.contents) body = JSON.parse(e.postData.contents);
     var action = body.action || '';
     switch(action){
-      case 'firebaseLogin': return firebaseLogin(body); // Google sign-in (console)
-      case 'requestCode': return requestCode(body);     // email-code fallback
-      case 'verifyCode' : return verifyCode(body);      // email-code fallback
+      case 'requestCode': return requestCode(body);
+      case 'verifyCode' : return verifyCode(body);
+      case 'uploadFile' : return uploadFile(body);      // PUBLIC (no token)
       case 'submit'     : return submitInvoice(body);   // PUBLIC (no token)
       case 'list'       : return listInvoices(body);    // token required
       case 'act'        : return actOnInvoice(body);    // token required
@@ -129,43 +131,6 @@ function verifyCode(b){
   return json({ ok:true, token:token, role:who.role, name:who.name, scope: who.scope||'', email:email });
 }
 
-/***** FIREBASE SIGN-IN (console) *****/
-// Client signs in with Google via Firebase, sends us the resulting ID token.
-// We validate it against THIS Firebase project, confirm the email is an allow-listed
-// reviewer, and issue the same session token the rest of the app already uses.
-function firebaseLogin(b){
-  var idToken = String(b.idToken||'');
-  if (!idToken) return json({ ok:false, error:'Missing sign-in token.' });
-  var info = verifyFirebaseToken_(idToken);
-  if (!info || !info.email) return json({ ok:false, error:'Could not verify your Google sign-in.' });
-  if (!info.emailVerified) return json({ ok:false, error:'Your Google email is not verified.' });
-  var email = String(info.email).trim().toLowerCase();
-  var who = REVIEWERS[email];
-  if (!who) return json({ ok:false, error:'That account is not on the reviewer allow-list.' });
-  var token = Utilities.getUuid();
-  var sess = { email:email, role:who.role, name:who.name, scope: who.scope||'', exp: Date.now()+SESSION_TTL_DAYS*86400000 };
-  PropertiesService.getScriptProperties().setProperty('sess_'+token, JSON.stringify(sess));
-  return json({ ok:true, token:token, role:who.role, name:who.name, scope: who.scope||'', email:email });
-}
-
-// Validate a Firebase ID token via Identity Toolkit. Returns {email, emailVerified} or null.
-// A token for any other project (or an expired one) fails here, so this both authenticates
-// and confirms the token was minted by OUR project.
-function verifyFirebaseToken_(idToken){
-  try{
-    var url = 'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + encodeURIComponent(FIREBASE_API_KEY);
-    var res = UrlFetchApp.fetch(url, {
-      method:'post', contentType:'application/json',
-      payload: JSON.stringify({ idToken: idToken }), muteHttpExceptions:true
-    });
-    if (res.getResponseCode() !== 200) return null;
-    var data = JSON.parse(res.getContentText());
-    var u = data && data.users && data.users[0];
-    if (!u || !u.email) return null;
-    return { email: u.email, emailVerified: !!u.emailVerified };
-  }catch(e){ return null; }
-}
-
 function session(token){
   if (!token) return null;
   var raw = PropertiesService.getScriptProperties().getProperty('sess_'+token);
@@ -173,6 +138,22 @@ function session(token){
   var s = JSON.parse(raw);
   if (Date.now() > s.exp){ PropertiesService.getScriptProperties().deleteProperty('sess_'+token); return null; }
   return s;
+}
+
+/***** ATTACHMENT UPLOAD (public) *****/
+/* The form uploads each file the moment it's picked, while the contractor is still
+   typing. By the time they hit Submit the bytes are already in Drive, so submit
+   sends only the small text fields plus the file ids — which is what makes it
+   return instantly instead of stalling on a multi-MB base64 payload. */
+function uploadFile(b){
+  var f = b.file;
+  if (!f || !f.b64) return json({ ok:false, error:'No file received.' });
+  try{
+    var file = writeFile_(getFolder_(), f, 'PENDING-' + Utilities.getUuid().slice(0,8));
+    return json({ ok:true, fileId:file.getId(), name:f.name||'' });
+  }catch(e){
+    return json({ ok:false, error:String((e && e.message) || e) });
+  }
 }
 
 /***** SUBMIT (public) *****/
@@ -187,13 +168,24 @@ function submitInvoice(b){
   var amount = Number(b.amount)||0;
   var lineItemsJson = b.lineItems ? JSON.stringify(b.lineItems) : '';
 
-  // files -> Drive
-  var folder = getFolder_();
+  /* Files: normally already in Drive via uploadFile, so we just claim them by id.
+     The inline-b64 path stays as a fallback for a client whose background upload
+     failed — better a slow submit than a lost invoice. */
   var invoiceUrl = '';
-  if (b.invoiceFile && b.invoiceFile.b64){ invoiceUrl = saveFile_(folder, b.invoiceFile, id+'_invoice'); }
+  if (b.invoiceFileId){ invoiceUrl = adoptFile_(b.invoiceFileId, id+'_invoice'); }
+  if (!invoiceUrl && b.invoiceFile && b.invoiceFile.b64){ invoiceUrl = saveFile_(getFolder_(), b.invoiceFile, id+'_invoice'); }
+
   var receiptUrls = [];
+  if (Array.isArray(b.receiptFileIds)){
+    b.receiptFileIds.forEach(function(fid){
+      var u = adoptFile_(fid, id+'_receipt'+(receiptUrls.length+1));
+      if (u) receiptUrls.push(u);
+    });
+  }
   if (Array.isArray(b.receipts)){
-    b.receipts.forEach(function(r,i){ if(r && r.b64) receiptUrls.push(saveFile_(folder, r, id+'_receipt'+(i+1))); });
+    b.receipts.forEach(function(r){
+      if (r && r.b64) receiptUrls.push(saveFile_(getFolder_(), r, id+'_receipt'+(receiptUrls.length+1)));
+    });
   }
 
   var row = new Array(HEADERS.length).fill('');
@@ -460,14 +452,36 @@ function getFolder_(){
   });
   return folder;
 }
-function saveFile_(folder, f, baseName){
+function writeFile_(folder, f, baseName){
   var b64 = f.b64.indexOf(',')>=0 ? f.b64.split(',')[1] : f.b64; // tolerate data URLs
   var bytes = Utilities.base64Decode(b64);
   if (bytes.length > MAX_FILE_MB*1024*1024) throw new Error('File exceeds '+MAX_FILE_MB+'MB: '+(f.name||''));
   var ext = (f.name && f.name.indexOf('.')>=0) ? f.name.slice(f.name.lastIndexOf('.')) : '';
   var blob = Utilities.newBlob(bytes, f.type||'application/octet-stream', baseName+ext);
-  var file = folder.createFile(blob);
-  return file.getUrl();
+  return folder.createFile(blob);
+}
+function saveFile_(folder, f, baseName){ return writeFile_(folder, f, baseName).getUrl(); }
+
+/* A file uploaded as-you-go landed as PENDING-xxxx while the contractor was still
+   filling out the form. Once they actually submit, rename it to the invoice ID so
+   the Drive folder stays readable — and so anything still called PENDING-* is
+   obviously an abandoned draft you can sweep up. */
+function adoptFile_(fileId, baseName){
+  try{
+    var file = DriveApp.getFileById(String(fileId));
+    /* Only ever touch files THIS flow created. Without these two checks a caller
+       could hand us any file id the script account can reach and have it renamed
+       and linked into an invoice row. */
+    if (file.getName().indexOf('PENDING-') !== 0) return '';
+    var target = getFolder_().getId(), inFolder = false, parents = file.getParents();
+    while (parents.hasNext()){ if (parents.next().getId() === target){ inFolder = true; break; } }
+    if (!inFolder) return '';
+
+    var nm = file.getName();
+    var ext = nm.indexOf('.')>=0 ? nm.slice(nm.lastIndexOf('.')) : '';
+    file.setName(baseName+ext);
+    return file.getUrl();
+  }catch(e){ return ''; }
 }
 
 /***** RUN ONCE *****/
