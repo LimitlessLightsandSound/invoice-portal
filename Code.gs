@@ -51,6 +51,11 @@ const SESSION_TTL_DAYS  = 30;     // how long a login lasts
 const MAX_CODE_ATTEMPTS = 5;      // brute-force guard
 const MAX_FILE_MB       = 10;     // per uploaded file
 
+/***** FIREBASE AUTH (used by the CRM invoices console) *****/
+// Web API key from your Firebase project: Project settings > General > "Web API key".
+// This is PUBLIC by design — it only lets the backend VALIDATE ID tokens for this one project.
+const FIREBASE_API_KEY = 'PASTE_FIREBASE_WEB_API_KEY';
+
 /***** TABS *****/
 const PRODUCTIONS_TAB = 'Productions';
 const INSTALLS_TAB    = 'Installs';
@@ -82,6 +87,7 @@ function doPost(e){
     if (e && e.postData && e.postData.contents) body = JSON.parse(e.postData.contents);
     var action = body.action || '';
     switch(action){
+      case 'firebaseLogin': return firebaseLogin(body); // CRM console sign-in
       case 'requestCode': return requestCode(body);
       case 'verifyCode' : return verifyCode(body);
       case 'uploadFile' : return uploadFile(body);      // PUBLIC (no token)
@@ -129,6 +135,43 @@ function verifyCode(b){
   var sess = { email:email, role:who.role, name:who.name, scope: who.scope||'', exp: Date.now()+SESSION_TTL_DAYS*86400000 };
   props.setProperty('sess_'+token, JSON.stringify(sess));
   return json({ ok:true, token:token, role:who.role, name:who.name, scope: who.scope||'', email:email });
+}
+
+/***** FIREBASE SIGN-IN (CRM invoices console) *****/
+// Client signs in with Google via Firebase, sends us the resulting ID token.
+// We validate it against THIS Firebase project, confirm the email is an allow-listed
+// reviewer, and issue the same session token the rest of the app already uses.
+function firebaseLogin(b){
+  var idToken = String(b.idToken||'');
+  if (!idToken) return json({ ok:false, error:'Missing sign-in token.' });
+  var info = verifyFirebaseToken_(idToken);
+  if (!info || !info.email) return json({ ok:false, error:'Could not verify your Google sign-in.' });
+  if (!info.emailVerified) return json({ ok:false, error:'Your Google email is not verified.' });
+  var email = String(info.email).trim().toLowerCase();
+  var who = REVIEWERS[email];
+  if (!who) return json({ ok:false, error:'That account is not on the reviewer allow-list.' });
+  var token = Utilities.getUuid();
+  var sess = { email:email, role:who.role, name:who.name, scope: who.scope||'', exp: Date.now()+SESSION_TTL_DAYS*86400000 };
+  PropertiesService.getScriptProperties().setProperty('sess_'+token, JSON.stringify(sess));
+  return json({ ok:true, token:token, role:who.role, name:who.name, scope: who.scope||'', email:email });
+}
+
+// Validate a Firebase ID token via Identity Toolkit. Returns {email, emailVerified} or null.
+// A token for any other project (or an expired one) fails here, so this both authenticates
+// and confirms the token was minted by OUR project.
+function verifyFirebaseToken_(idToken){
+  try{
+    var url = 'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + encodeURIComponent(FIREBASE_API_KEY);
+    var res = UrlFetchApp.fetch(url, {
+      method:'post', contentType:'application/json',
+      payload: JSON.stringify({ idToken: idToken }), muteHttpExceptions:true
+    });
+    if (res.getResponseCode() !== 200) return null;
+    var data = JSON.parse(res.getContentText());
+    var u = data && data.users && data.users[0];
+    if (!u || !u.email) return null;
+    return { email: u.email, emailVerified: !!u.emailVerified };
+  }catch(e){ return null; }
 }
 
 function session(token){

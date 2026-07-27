@@ -1,6 +1,8 @@
 # Limitless Invoice Portal — deploy packet
 
-Public forms where contractors submit labor invoices and install billing. Submissions land in a Google Sheet, attachments in Google Drive. **Review and approval happen in the Limitless CRM**, not here.
+Public forms where contractors submit labor invoices and install billing. Submissions land in a Google Sheet, attachments in Google Drive.
+
+**Review and approval happen in the Limitless CRM**, whose invoices section reads and writes through this same Apps Script API — see [How the CRM reads these invoices](#how-the-crm-reads-these-invoices). This repo is the intake half only.
 
 **Stack:** static HTML on GitHub Pages → Google Apps Script web app → Google Sheet (data) + Google Drive (files). No build step, no monthly cost.
 
@@ -91,6 +93,25 @@ Save, commit, push.
 
 ---
 
-## Note on the unused review endpoints
+## How the CRM reads these invoices
 
-`Code.gs` still exposes `requestCode` / `verifyCode` / `list` / `act` — an email-code login and a review API left over from a standalone approval console that was removed (the CRM does that job now). **Nothing in this repo calls them.** They're harmless, and they'd be the natural way to let the CRM pull invoices from this Sheet. If that integration never happens, they can be deleted along with `REVIEWERS`' role/scope fields — but keep `REVIEWERS` itself, since `getFolder_()` uses it to share the Drive folder.
+The invoices section of **Limitless Pipeline** is a client of *this* backend — it does not have its own copy of the data. `src/invoices/api.ts` POSTs to the same `/exec` URL:
+
+| CRM call | `Code.gs` action | Purpose |
+|---|---|---|
+| `firebaseLogin(idToken)` | `firebaseLogin` | Staff sign in with their normal CRM Google account; the ID token is validated against the `limitless-crm-336ee` Firebase project and the email checked against `REVIEWERS`. |
+| `listInvoices(token)` | `list` | Fetch invoices, scoped server-side by role. |
+| `act(token, …)` | `act` | approve / escalate / reject / billed / reopen. |
+
+So the flow is: **contractor form → Apps Script → Sheet + Drive → CRM invoices page.** Nothing else is needed to "get invoices into the CRM" — do not build a second pipeline.
+
+**These endpoints are load-bearing. Don't delete `firebaseLogin`, `list`, or `act`.**
+
+### Two wires to connect it
+
+1. **`FIREBASE_API_KEY` in `Code.gs`** — Firebase console → project `limitless-crm-336ee` → Project settings → General → **Web API key**. Without it `firebaseLogin` can't validate tokens and every reviewer is rejected. (Public by design — it identifies the project, it doesn't grant access.)
+2. **`VITE_INVOICE_API_URL` in the CRM's build env** — set to this deployment's `/exec` URL, then redeploy the CRM.
+
+**While `VITE_INVOICE_API_URL` is unset, the CRM invoices page runs on in-memory fixtures** (`src/invoices/fixtures.ts`) — it looks fully populated but none of it is real. That's deliberate: it keeps demo builds, unit tests, and the Playwright e2e suite off the live Apps Script. It also means "the invoices page works" is not evidence the connection is live. Check for a real invoice you submitted yourself.
+
+The email-code endpoints (`requestCode` / `verifyCode`) are the older sign-in path and currently have no caller now that the standalone console is gone. They're harmless to keep as a backdoor if Firebase auth ever breaks.
