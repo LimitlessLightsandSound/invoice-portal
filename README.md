@@ -47,7 +47,7 @@ The Drive folder is shared with the five staff emails in `REVIEWERS` (Dash, Tony
 
 Submitting is near-instant even with large files, because the bytes are already gone by the time anyone presses Submit.
 
-1. Contractor picks a file → the form immediately POSTs it (`action:'uploadFile'`) with a live progress bar, while they keep filling out the rest of the form.
+1. Contractor picks a file → the form immediately POSTs it (`action:'uploadFile'`) with an indeterminate progress bar, while they keep filling out the rest of the form.
 2. It lands in Drive as `PENDING-xxxxxxxx.pdf` and the form holds onto the file id.
 3. On submit, only the text fields + file ids go over the wire. The backend renames each file to the invoice ID (`INV-20260727-A1B4_invoice.pdf`).
 
@@ -86,7 +86,8 @@ Save, commit, push.
 ## Gotchas
 
 - **Edited `Code.gs`, nothing changed?** Redeploy: *Deploy → Manage deployments → Edit → Version: **New version***. Apps Script serves the last *deployed* version, not the last save. This is the single most common cause of "I fixed it but it's still broken."
-- **"Failed to fetch" / CORS?** The forms POST as plain text on purpose — that's a "simple" request, which skips the CORS preflight Apps Script cannot answer. Don't add a JSON `Content-Type` or an `Authorization` header, and don't switch the upload path off `XMLHttpRequest` without checking this still holds.
+- **"Failed to fetch" / CORS?** The forms POST as plain text on purpose — that's a "simple" request, which skips the CORS preflight Apps Script cannot answer. Three ways to break it, all of which make *every* upload fail: adding a JSON `Content-Type`, adding an `Authorization` header, or **switching uploads to `XMLHttpRequest` with an `upload.onprogress` listener.**
+- **Why is the upload bar indeterminate instead of showing a percentage?** Because a real percentage requires XHR's `upload.onprogress`, and per the CORS spec *merely registering* an upload listener makes the request non-simple — forcing a preflight `OPTIONS` that Apps Script cannot answer. This was shipped once and broke every attachment. Measured cross-origin in a browser: plain `fetch` → 200, XHR without the listener → 200, XHR **with** it → fails. The bar is indeterminate on purpose; don't "improve" it.
 - **Attachment links won't open?** The Drive folder is shared only with the five staff emails; the reviewer must be signed into that Google account. Files aren't public by design.
 - **Sheet not styled?** Run `restyle()` from the Apps Script editor.
 - **Drive filling up with `PENDING-*` files?** Abandoned drafts. Delete freely.
