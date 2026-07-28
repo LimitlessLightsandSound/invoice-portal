@@ -370,16 +370,22 @@ function ensureSheets_(){
       "=IFERROR(QUERY({'"+PRODUCTIONS_TAB+"'!A2:AA;'"+INSTALLS_TAB+"'!A2:AA}, " +
       "\"select Col2,Col4,Col5,Col9,Col10,Col12,Col17,Col3,Col27 where Col3='approved' or Col3='billed' order by Col1 desc\", 0), )"
     );
+    styleApprovedTab_(ap);
   }
-  styleApprovedTab_(ap);
 }
 
+/* HOT PATH — runs on every submit and every list. It must only ENSURE the tab
+ * exists with headers. The glossy theme is expensive (row banding, conditional
+ * format rules and column widths over whole columns) and used to be re-applied on
+ * every single submission. It now runs once at creation; use restyle() to
+ * re-apply it on demand. */
 function ensureDataTab_(name, accent){
   var sh = sheet_(name);
   if (sh.getLastRow()===0){
     sh.getRange(1,1,1,HEADERS.length).setValues([HEADERS]);
+    styleDataTab_(sh, accent);
   }
-  styleDataTab_(sh, accent);
+  return sh;
 }
 
 /***** GLOSSY THEME *****/
@@ -486,14 +492,49 @@ function rowToObj_(r){
 }
 function safeParse_(s){ try{return JSON.parse(s);}catch(e){return null;} }
 
+/* Resolve the Drive folder, cheaply.
+ *
+ * This used to run a getFoldersByName SEARCH and re-add all five reviewers as
+ * viewers on EVERY call — five Drive permission writes per request, each firing a
+ * "shared with you" email. getFolder_ runs for every attachment upload and again
+ * for every file claimed on submit, so a two-file invoice meant ~15 permission
+ * writes and a burst of notification mail. That was BOTH the slowness and the
+ * email spam. Sharing now happens once, in setup(), via shareFolder_().
+ *
+ * Cached two ways: the id survives in ScriptProperties across executions, and
+ * FOLDER_CACHE avoids repeat lookups within a single execution (submit claims
+ * several files in a row). */
+var FOLDER_CACHE = null;
 function getFolder_(){
+  if (FOLDER_CACHE) return FOLDER_CACHE;
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('folderId');
+  if (id){
+    try { FOLDER_CACHE = DriveApp.getFolderById(id); return FOLDER_CACHE; }
+    catch(e){ /* deleted or stale id — fall through and re-resolve */ }
+  }
   var it = DriveApp.getFoldersByName(DRIVE_FOLDER_NAME);
   var folder = it.hasNext() ? it.next() : DriveApp.createFolder(DRIVE_FOLDER_NAME);
-  // share with reviewers so they can open invoice files (no public links)
-  Object.keys(REVIEWERS).forEach(function(em){
-    try{ folder.addViewer(em); }catch(e){}
-  });
+  props.setProperty('folderId', folder.getId());
+  FOLDER_CACHE = folder;
   return folder;
+}
+
+/* Share the folder with the reviewers so they can open attachments (no public
+ * links). Idempotent: only adds someone who isn't already on the folder, so
+ * re-running setup() doesn't re-notify everyone. Run setup() again after editing
+ * REVIEWERS — that is the ONLY place sharing should happen. */
+function shareFolder_(){
+  var folder = getFolder_();
+  var have = {};
+  folder.getViewers().forEach(function(u){ have[String(u.getEmail()).toLowerCase()] = 1; });
+  folder.getEditors().forEach(function(u){ have[String(u.getEmail()).toLowerCase()] = 1; });
+  try { var o = folder.getOwner(); if (o) have[String(o.getEmail()).toLowerCase()] = 1; } catch(e){}
+  var added = 0;
+  Object.keys(REVIEWERS).forEach(function(em){
+    if (!have[em]){ try { folder.addViewer(em); added++; } catch(e){} }
+  });
+  return added;
 }
 function writeFile_(folder, f, baseName){
   var b64 = f.b64.indexOf(',')>=0 ? f.b64.split(',')[1] : f.b64; // tolerate data URLs
@@ -530,8 +571,11 @@ function adoptFile_(fileId, baseName){
 /***** RUN ONCE *****/
 function setup(){
   ensureSheets_();
-  getFolder_();
-  Logger.log('Setup complete. Tabs built + styled. Now deploy as a Web App (Execute as: Me, Access: Anyone).');
+  restyle();                    // style existing tabs too, not just freshly created ones
+  var added = shareFolder_();   // the ONLY place the folder gets shared — see getFolder_()
+  Logger.log('Setup complete. Tabs built + styled. Reviewers added to the Drive folder: ' + added +
+             ' (0 means everyone already had access — no notification emails sent). ' +
+             'Now deploy as a Web App (Execute as: Me, Access: Anyone).');
 }
 
 // Re-apply the glossy theme any time (safe to run repeatedly).

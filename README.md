@@ -90,6 +90,8 @@ Save, commit, push.
 - **Why is the upload bar indeterminate instead of showing a percentage?** Because a real percentage requires XHR's `upload.onprogress`, and per the CORS spec *merely registering* an upload listener makes the request non-simple — forcing a preflight `OPTIONS` that Apps Script cannot answer. This was shipped once and broke every attachment. Measured cross-origin in a browser: plain `fetch` → 200, XHR without the listener → 200, XHR **with** it → fails. The bar is indeterminate on purpose; don't "improve" it.
 - **Attachment links won't open?** The Drive folder is shared only with the five staff emails; the reviewer must be signed into that Google account. Files aren't public by design.
 - **Sheet not styled?** Run `restyle()` from the Apps Script editor.
+- **Getting "shared with you" emails on every upload and submission?** That was `getFolder_()` re-adding all five reviewers as viewers on *every* call — a Drive permission write per reviewer per request, each one sending mail. Sharing now happens **only** in `setup()`, through `shareFolder_()`, which skips anyone who already has access. Don't move sharing back into `getFolder_()`. After adding someone to `REVIEWERS`, run `setup()` once to grant them folder access.
+- **Uploads or submits feel slow?** Two things used to run on every single request and no longer do: the folder re-share above (~15 Drive writes for a two-file invoice) and a full re-application of the sheet theme — banding, conditional formats and column widths — inside `ensureSheets_()`. Both are now one-time. Keep the hot path (`uploadFile`, `submit`, `list`) free of Drive permission writes and formatting calls.
 - **Drive filling up with `PENDING-*` files?** Abandoned drafts. Delete freely.
 
 ---
