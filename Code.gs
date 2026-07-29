@@ -193,7 +193,16 @@ function uploadFile(b){
   if (!f || !f.b64) return json({ ok:false, error:'No file received.' });
   try{
     var file = writeFile_(getFolder_(), f, 'PENDING-' + Utilities.getUuid().slice(0,8));
-    return json({ ok:true, fileId:file.getId(), name:f.name||'' });
+    var id = file.getId();
+    /* Remember that WE minted this id. submit then trusts this record instead of
+       re-fetching the file from Drive to verify it — that verification cost ~1.3s
+       per attachment on the button press the contractor actually waits on. */
+    try { CacheService.getScriptCache().put('pend_'+id, '1', 21600); } catch(e){}
+    /* Uploads happen in the background while the contractor is still filling in the
+       form, so this is the one path that can absorb spare work. Drain a few queued
+       renames here rather than on submit. */
+    try { sweepRenames_(3); } catch(e){}
+    return json({ ok:true, fileId:id, name:f.name||'' });
   }catch(e){
     return json({ ok:false, error:String((e && e.message) || e) });
   }
@@ -215,13 +224,13 @@ function submitInvoice(b){
      The inline-b64 path stays as a fallback for a client whose background upload
      failed — better a slow submit than a lost invoice. */
   var invoiceUrl = '';
-  if (b.invoiceFileId){ invoiceUrl = adoptFile_(b.invoiceFileId, id+'_invoice'); }
+  if (b.invoiceFileId){ invoiceUrl = claimFile_(b.invoiceFileId, id+'_invoice'); }
   if (!invoiceUrl && b.invoiceFile && b.invoiceFile.b64){ invoiceUrl = saveFile_(getFolder_(), b.invoiceFile, id+'_invoice'); }
 
   var receiptUrls = [];
   if (Array.isArray(b.receiptFileIds)){
     b.receiptFileIds.forEach(function(fid){
-      var u = adoptFile_(fid, id+'_receipt'+(receiptUrls.length+1));
+      var u = claimFile_(fid, id+'_receipt'+(receiptUrls.length+1));
       if (u) receiptUrls.push(u);
     });
   }
@@ -546,6 +555,67 @@ function writeFile_(folder, f, baseName){
 }
 function saveFile_(folder, f, baseName){ return writeFile_(folder, f, baseName).getUrl(); }
 
+/* Build a Drive view link from a file id WITHOUT a Drive round trip. getUrl()
+   needs the File object, and fetching it costs an API call per attachment on the
+   submit path — exactly the cost we're removing. This link form is stable and
+   keeps working after the file is later renamed, because it's keyed on the id. */
+function driveUrl_(id){ return 'https://drive.google.com/file/d/' + id + '/view'; }
+
+/* Claim a file that uploadFile already put in Drive.
+ *
+ * FAST PATH (the normal one): uploadFile recorded this id in the script cache, so
+ * we know we minted it without asking Drive. Build the link from the id and queue
+ * the rename for later — zero Drive calls, which is what keeps submit responsive.
+ *
+ * SLOW PATH: cache miss — expired, evicted, or a submit long after the upload.
+ * Fall back to the fully verified route (fetch the file, confirm it is still named
+ * PENDING-* and really lives in our folder). The cache is only ever a speed-up; it
+ * is never the security boundary, so a caller still cannot get an arbitrary file
+ * id renamed and linked into an invoice row. */
+function claimFile_(fileId, baseName){
+  var id = String(fileId||''); if (!id) return '';
+  var known = false;
+  try { known = !!CacheService.getScriptCache().get('pend_'+id); } catch(e){}
+  if (known){
+    queueRename_(id, baseName);
+    return driveUrl_(id);
+  }
+  return adoptFile_(id, baseName);
+}
+
+/* Renaming PENDING-xxxx to the invoice id is cosmetic — it keeps the Drive folder
+   readable. It is not worth a Drive round trip while the contractor watches a
+   spinner, so record the intent and let sweepRenames_() do it off the hot path. */
+function queueRename_(fileId, baseName){
+  try { PropertiesService.getScriptProperties().setProperty('rn_'+fileId, baseName); }catch(e){}
+}
+
+/* Bounded, best-effort rename sweep. Called from uploadFile (background) and from
+   setup(); never from submit. A cosmetic filename must never break a request, so
+   every failure just drops the entry — the row's link is id-based and unaffected. */
+function sweepRenames_(max){
+  var props = PropertiesService.getScriptProperties(), keys, done = 0;
+  try { keys = props.getKeys(); } catch(e){ return 0; }
+  for (var i=0; i<keys.length && done<max; i++){
+    if (keys[i].indexOf('rn_') !== 0) continue;
+    var id = keys[i].slice(3), base = props.getProperty(keys[i]);
+    try{
+      var f  = DriveApp.getFileById(id);
+      var nm = f.getName();
+      if (nm.indexOf('PENDING-') === 0){
+        var ext = nm.indexOf('.')>=0 ? nm.slice(nm.lastIndexOf('.')) : '';
+        f.setName(base + ext);
+      }
+    }catch(e){ /* file deleted — drop the entry below */ }
+    try { props.deleteProperty(keys[i]); } catch(e){}
+    done++;
+  }
+  return done;
+}
+
+/* Run from the editor to flush the whole rename backlog at once. */
+function sweepRenames(){ Logger.log('Renamed ' + sweepRenames_(200) + ' file(s).'); }
+
 /* A file uploaded as-you-go landed as PENDING-xxxx while the contractor was still
    filling out the form. Once they actually submit, rename it to the invoice ID so
    the Drive folder stays readable — and so anything still called PENDING-* is
@@ -573,6 +643,7 @@ function setup(){
   ensureSheets_();
   restyle();                    // style existing tabs too, not just freshly created ones
   var added = shareFolder_();   // the ONLY place the folder gets shared — see getFolder_()
+  sweepRenames_(200);           // flush any PENDING-* files still awaiting their invoice-id name
   Logger.log('Setup complete. Tabs built + styled. Reviewers added to the Drive folder: ' + added +
              ' (0 means everyone already had access — no notification emails sent). ' +
              'Now deploy as a Web App (Execute as: Me, Access: Anyone).');

@@ -49,9 +49,10 @@ Submitting is near-instant even with large files, because the bytes are already 
 
 1. Contractor picks a file → the form immediately POSTs it (`action:'uploadFile'`) with an indeterminate progress bar, while they keep filling out the rest of the form.
 2. It lands in Drive as `PENDING-xxxxxxxx.pdf` and the form holds onto the file id.
-3. On submit, only the text fields + file ids go over the wire. The backend renames each file to the invoice ID (`INV-20260727-A1B4_invoice.pdf`).
+3. On submit, only the text fields + file ids go over the wire — and **submit makes no Drive calls at all**. `uploadFile` records each id it minted in the script cache, so `claimFile_()` trusts that record instead of re-fetching the file to verify it, and builds the row's link straight from the id. Re-verifying cost ~1.3s *per attachment* on the button press.
+4. Renaming `PENDING-xxxxxxxx.pdf` → `INV-20260729-A1B4_invoice.pdf` is cosmetic, so it's queued and done later by `sweepRenames_()` — off the hot path, a few at a time during subsequent uploads, or all at once from `setup()` / by running `sweepRenames()` in the editor. Drive links are id-based, so they work identically before and after the rename.
 
-**Leftover `PENDING-*` files are abandoned drafts** — someone attached a file and never submitted. They're safe to delete; nothing references them.
+**Careful with `PENDING-*` files.** Most are abandoned drafts — someone attached a file and never submitted — and those are safe to delete. But a *just-submitted* file also stays `PENDING-*` until the sweep renames it. Before bulk-deleting, run `sweepRenames()` first: whatever is still `PENDING-*` after that is genuinely abandoned.
 
 If a background upload fails, the attachment shows a **Retry** link and submit is blocked until it succeeds, so an invoice can't silently arrive without its paperwork. If a client somehow submits without pre-uploading, the backend still accepts inline file bytes as a fallback — slower, but nothing is lost.
 
