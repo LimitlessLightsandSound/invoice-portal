@@ -535,15 +535,45 @@ function getFolder_(){
  * REVIEWERS — that is the ONLY place sharing should happen. */
 function shareFolder_(){
   var folder = getFolder_();
-  var have = {};
-  folder.getViewers().forEach(function(u){ have[String(u.getEmail()).toLowerCase()] = 1; });
-  folder.getEditors().forEach(function(u){ have[String(u.getEmail()).toLowerCase()] = 1; });
-  try { var o = folder.getOwner(); if (o) have[String(o.getEmail()).toLowerCase()] = 1; } catch(e){}
-  var added = 0;
+
+  /* Per-person viewer grants are what make Google notify people. First the
+     "shared with you" mail, and then — for as long as the grant exists — an
+     ongoing "files were added to a folder shared with you" activity feed plus
+     Drive Chat pings, fired every time an invoice drops attachments in here.
+     None of that comes from this script; Drive generates it because the folder is
+     explicitly shared. Domain link access gives the reviewers the same read
+     access with NO per-user permission, so Drive has nobody to notify. */
+  var domainOk = false;
+  try {
+    folder.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW);
+    domainOk = true;
+  } catch(e){ domainOk = false; }
+
+  if (!domainOk){
+    /* Domain sharing refused — not a Workspace domain, or an admin policy blocks
+       it. Fall back to per-person grants: reviewers losing access to invoice
+       attachments is a worse outcome than some notification mail. */
+    var have = {};
+    folder.getViewers().forEach(function(u){ have[String(u.getEmail()).toLowerCase()] = 1; });
+    folder.getEditors().forEach(function(u){ have[String(u.getEmail()).toLowerCase()] = 1; });
+    try { var o = folder.getOwner(); if (o) have[String(o.getEmail()).toLowerCase()] = 1; } catch(e){}
+    var added = 0;
+    Object.keys(REVIEWERS).forEach(function(em){
+      if (!have[em]){ try { folder.addViewer(em); added++; } catch(e){} }
+    });
+    return 'DOMAIN SHARING UNAVAILABLE — fell back to per-person grants (added ' + added +
+           '). Notifications will continue; each reviewer must mute Drive notifications themselves.';
+  }
+
+  /* Drop the individual grants earlier versions left behind. While they exist,
+     those people keep getting the activity notifications this is meant to end. */
+  var present = {};
+  folder.getViewers().forEach(function(u){ present[String(u.getEmail()).toLowerCase()] = 1; });
+  var removed = 0;
   Object.keys(REVIEWERS).forEach(function(em){
-    if (!have[em]){ try { folder.addViewer(em); added++; } catch(e){} }
+    if (present[em]){ try { folder.removeViewer(em); removed++; } catch(e){} }
   });
-  return added;
+  return 'Domain link access set; removed ' + removed + ' individual grant(s). No more Drive notifications.';
 }
 function writeFile_(folder, f, baseName){
   var b64 = f.b64.indexOf(',')>=0 ? f.b64.split(',')[1] : f.b64; // tolerate data URLs
@@ -642,11 +672,11 @@ function adoptFile_(fileId, baseName){
 function setup(){
   ensureSheets_();
   restyle();                    // style existing tabs too, not just freshly created ones
-  var added = shareFolder_();   // the ONLY place the folder gets shared — see getFolder_()
-  sweepRenames_(200);           // flush any PENDING-* files still awaiting their invoice-id name
-  Logger.log('Setup complete. Tabs built + styled. Reviewers added to the Drive folder: ' + added +
-             ' (0 means everyone already had access — no notification emails sent). ' +
-             'Now deploy as a Web App (Execute as: Me, Access: Anyone).');
+  var sharing = shareFolder_();  // the ONLY place the folder gets shared — see getFolder_()
+  var renamed = sweepRenames_(200);
+  Logger.log('Setup complete. Tabs built + styled.\nDrive sharing: ' + sharing +
+             '\nPENDING files renamed: ' + renamed +
+             '\nNow deploy as a Web App (Execute as: Me, Access: Anyone).');
 }
 
 // Re-apply the glossy theme any time (safe to run repeatedly).

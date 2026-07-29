@@ -39,7 +39,11 @@ The **API URL** (`const API = '…/exec'`) appears near the top of the `<script>
 
 `setup()` builds and styles both tabs plus a combined **Approved** tab and the Drive folder. Run `restyle()` anytime to re-apply the theme.
 
-The Drive folder is shared with the five staff emails in `REVIEWERS` (Dash, Tony, Gabe, Taryn, Accounting) so they can open attachments. Files are **not** public — a reviewer must be signed into that Google account.
+The Drive folder uses **domain link access** — anyone signed in at `limitlesslightsandsound.com` who has a link can view an attachment. It is **not** public: a signed-out visitor, or anyone outside the domain, gets nothing.
+
+**Why not share it with the five reviewers individually?** Because a per-person grant is what makes Google send them mail. First a "shared with you" notice, then — for as long as the grant exists — an ongoing "files were added to a folder shared with you" activity feed and Drive Chat pings, every single time an invoice drops attachments in. None of that comes from this script; Drive generates it because the folder is explicitly shared. Link access gives the same read access with no per-user permission, so there is nobody for Drive to notify. `shareFolder_()` sets this and removes any leftover individual grants.
+
+If domain sharing is ever refused (admin policy), `shareFolder_()` falls back to per-person grants and says so in the `setup()` log — reviewers keep access, but the notifications come back.
 
 ---
 
