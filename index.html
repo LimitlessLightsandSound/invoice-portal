@@ -70,6 +70,21 @@
   .total-bar .lbl{font-size:13px;color:rgba(255,255,255,.72);font-weight:500}
   .total-bar .amt{font-family:'Playfair Display',serif;font-weight:800;font-size:28px}
   #rcptList{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+  /* itemised expenses — mirrors .line so the two sections read as one system */
+  #expList{display:flex;flex-direction:column;gap:10px}
+  .exp{display:grid;grid-template-columns:190px 110px 1fr 170px 40px;gap:10px;align-items:end}
+  .exp select,.exp input{width:100%}
+  .exp .ex-file{display:flex;align-items:center;gap:8px;min-height:42px}
+  .exp .ex-pick{border:1.5px dashed var(--line-2);background:transparent;color:var(--navy);font-family:'Inter';font-weight:600;font-size:12.5px;padding:10px 12px;border-radius:9px;cursor:pointer;white-space:nowrap}
+  .exp .ex-pick:hover{border-color:var(--blue);background:var(--blue-bg)}
+  .exp .ex-status{font-size:11.5px;display:flex;align-items:center;gap:6px;min-width:0}
+  .exp .ex-status .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:80px;color:var(--muted)}
+  .totals{margin-top:18px;border-top:1.5px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:7px}
+  .totals .row{display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted)}
+  .totals .row b{color:var(--ink);font-weight:600}
+  .totals .row.grand{font-size:17px;color:var(--navy);border-top:1px dashed var(--line-2);padding-top:10px;margin-top:3px}
+  .totals .row.grand b{font-family:'Playfair Display',serif;font-weight:800;font-size:21px;color:var(--navy)}
+  @media(max-width:680px){.exp{grid-template-columns:1fr 1fr;gap:8px}.exp .ex-desc-cell{grid-column:1/-1}.exp .ex-file{grid-column:1/-1}.exp .del{grid-column:2;justify-self:end}}
   .rcpt{display:flex;align-items:center;gap:11px;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px}
   .rcpt .nm{flex:1;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rcpt .sz{color:var(--muted);font-size:11.5px}.rcpt .x{border:none;background:none;color:var(--red);cursor:pointer;font-size:16px;padding:2px 6px}
@@ -163,17 +178,22 @@
     </div>
 
     <div class="card">
-      <div class="sec-head"><span class="sec-num">3</span> Receipts &amp; notes</div>
-      <p class="sec-sub">Attach receipts for any reimbursable expenses. Optional.</p>
+      <div class="sec-head"><span class="sec-num">3</span> Expenses &amp; notes</div>
+      <p class="sec-sub">Itemise any reimbursable expenses by category. Attach the receipt for each one where you have it — mileage and per diem usually won't have one. <b>Expenses are added to your invoice total.</b></p>
       <div class="grid">
         <div class="field full">
-          <label>Receipts <span class="hint">(images or PDF, optional)</span></label>
-          <button type="button" class="add-line" id="addRcpt" style="margin-top:0">+ Attach receipt(s)</button>
-          <input type="file" id="rcptInput" accept="image/*,application/pdf" multiple>
-          <div id="rcptList"></div>
+          <label>Reimbursable expenses <span class="hint">(optional — pick a category and enter the amount)</span></label>
+          <div id="expList"></div>
+          <button type="button" class="add-line" id="addExp">+ Add an expense</button>
         </div>
         <div class="field full"><label>Notes for the team <span class="hint">(optional)</span></label><textarea name="notes" placeholder="Anything we should know…"></textarea></div>
       </div>
+      <div class="totals">
+        <div class="row"><span id="laborLabel">Labor</span><b id="tLabor">$0.00</b></div>
+        <div class="row"><span>Expenses <span class="hint" id="expCount"></span></span><b id="tExp">$0.00</b></div>
+        <div class="row grand"><span>Total</span><b id="tTotal">$0.00</b></div>
+      </div>
+
       <div class="actions">
         <button type="submit" class="btn btn-primary" id="submitBtn">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
@@ -252,11 +272,11 @@ function statusHTML(a,key){
   if(a.status==='error')return `<button type="button" class="st err" data-retry="${key}" title="${esc(a.err||'')}">Retry</button>`;
   return `<span class="st ok">Attached</span>`;
 }
-function render(){renderInv();renderRcpts();
-  $$('[data-retry]').forEach(b=>b.onclick=()=>{
-    const k=b.dataset.retry;const a=(k==='inv')?invFile:receipts[+k];
-    if(a)uploadOne(a);
-  });
+function render(){
+  renderInv();
+  $$('#expList .exp').forEach(row=>paintStatus(row.querySelector('.ex-status'),row._att));
+  const rb=$('#invFileBox [data-retry]');if(rb)rb.onclick=()=>{if(invFile)uploadOne(invFile);};
+  recalc();
 }
 
 $('select[name=pm]').onchange=function(){$('#pmOtherWrap').style.display=this.value==='__other__'?'flex':'none';};
@@ -265,6 +285,7 @@ let mode='hours';
 $$('.mode-btn').forEach(b=>b.onclick=()=>{
   $$('.mode-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;
   ['file','hours'].forEach(m=>$('#m-'+m).style.display=(m===mode?'block':'none'));
+  recalc();   /* labor comes from a different field in each mode */
 });
 
 let invFile=null;
@@ -315,16 +336,88 @@ function lineTotal(l){
   const ot=l.querySelector('.li-ot-toggle').checked?(+l.querySelector('.li-ot').value||0):0;
   return h*r+ot*r*1.5;
 }
-function recalc(){let t=0;$$('#lineItems .line').forEach(l=>{const lt=lineTotal(l);t+=lt;l.querySelector('.calc').textContent=money(lt);});$('#hoursTotal').textContent=money(t);}
+/* Single source of truth for the money shown on the form. laborAmount() is the
+   hours grid or the typed invoice total depending on mode; expenses always add on
+   top, which is what the backend bills. Showing the split makes it obvious when a
+   contractor has put expenses on an uploaded invoice AND itemised them again. */
+function laborAmount(){
+  if(mode==='file')return +($('#f').elements['amountFile']?.value||0)||0;
+  let t=0;$$('#lineItems .line').forEach(l=>t+=lineTotal(l));return t;
+}
+function expensesTotal(){return readExpenses().reduce((s,e)=>s+e.amount,0);}
+function recalc(){
+  let t=0;$$('#lineItems .line').forEach(l=>{const lt=lineTotal(l);t+=lt;l.querySelector('.calc').textContent=money(lt);});
+  $('#hoursTotal').textContent=money(t);
+  const lab=laborAmount(),exp=expensesTotal(),n=readExpenses().length;
+  $('#laborLabel').textContent = mode==='file' ? 'Invoice total' : 'Labor';
+  $('#tLabor').textContent=money(lab);
+  $('#tExp').textContent=money(exp);
+  $('#expCount').textContent=n?`(${n} item${n>1?'s':''})`:'';
+  $('#tTotal').textContent=money(lab+exp);
+}
 $('#addLine').onclick=()=>$('#lineItems').appendChild(lineRow());
 $('#lineItems').appendChild(lineRow());
+/* Expenses start empty — they're optional. In 'file' mode labor comes from the
+   typed invoice total, so that field has to drive the summary too. */
+const amtFile=$('#f').elements['amountFile']; if(amtFile) amtFile.oninput=recalc;
+recalc();
 
-let receipts=[];
-$('#addRcpt').onclick=()=>$('#rcptInput').click();
-$('#rcptInput').onchange=function(){[...this.files].forEach(f=>{if(f.size>10*1024*1024){toast(`"${f.name}" over 10MB — skipped`,'warn');return;}receipts.push(attach(f));});render();this.value='';};
-function renderRcpts(){
-  $('#rcptList').innerHTML=receipts.map((r,i)=>`<div class="rcpt"><span class="nm">${esc(r.name)}</span><span class="sz">${(r.size/1024).toFixed(0)} KB</span>${statusHTML(r,i)}<button type="button" class="x" data-i="${i}">×</button></div>`).join('');
-  $$('#rcptList .x').forEach(b=>b.onclick=()=>{receipts.splice(+b.dataset.i,1);render();});
+/* Keep in sync with EXPENSE_CATEGORIES in Code.gs — submit rejects anything not on
+   that list, so adding an option here alone will bounce the submission. */
+const EXPENSE_CATS=['Rental car','Public transport','Mileage','Per diem (P/D)','Hospitality','Lodging','Small equipment purchase','Equipment rental','Parking'];
+
+/* An expense row is a live DOM node that owns its own file input and its own
+   attachment state (row._att), rather than being re-rendered from an array. The
+   attachment status changes asynchronously while the contractor is typing, and
+   rebuilding innerHTML on each status change would wipe whatever they'd entered. */
+function expenseRow(){
+  const d=document.createElement('div');d.className='exp';
+  d.innerHTML=`<div class="field"><label>Category</label><select class="ex-cat">
+      <option value="">Select…</option>${EXPENSE_CATS.map(c=>`<option>${esc(c)}</option>`).join('')}</select></div>
+    <div class="field"><label>Amount ($)</label><input class="ex-amt" type="number" min="0" step="0.01" placeholder="0.00"></div>
+    <div class="field ex-desc-cell"><label>Description <span class="hint">(optional)</span></label><input class="ex-desc" placeholder="e.g. 2 nights, Hampton Inn"></div>
+    <div class="ex-file"><button type="button" class="ex-pick">📎 Receipt</button><span class="ex-status"></span>
+      <input type="file" class="ex-input" accept="image/*,application/pdf"></div>
+    <button type="button" class="del">×</button>`;
+  d._att=null;
+  const input=d.querySelector('.ex-input');
+  d.querySelector('.ex-pick').onclick=()=>input.click();
+  input.onchange=function(){
+    const f=this.files[0];if(!f)return;
+    if(f.size>10*1024*1024){toast('That file is over 10MB','warn');this.value='';return;}
+    d._att=attach(f);   /* starts uploading immediately, same as the invoice file */
+    render();
+  };
+  d.querySelector('.del').onclick=()=>{d.remove();recalc();};
+  d.querySelector('.ex-amt').oninput=recalc;
+  d.querySelector('.ex-cat').onchange=recalc;
+  return d;
+}
+$('#addExp').onclick=()=>{$('#expList').appendChild(expenseRow());};
+
+/* Read the expense rows out of the DOM. Rows the contractor never touched are
+   skipped so an accidental "+ Add an expense" click can't block submit. */
+function readExpenses(){
+  return [...$$('#expList .exp')].map(row=>({
+    row,
+    category:row.querySelector('.ex-cat').value,
+    amount:+row.querySelector('.ex-amt').value||0,
+    desc:row.querySelector('.ex-desc').value.trim(),
+    att:row._att
+  })).filter(e=>e.category||e.amount>0||e.desc||e.att);
+}
+function expenseAttachments(){return [...$$('#expList .exp')].map(r=>r._att).filter(Boolean);}
+
+/* Paint one row's attachment state in place — never re-render the row itself. */
+function paintStatus(el,a){
+  if(!a){el.innerHTML='';return;}
+  if(a.status==='uploading'){el.innerHTML='<span class="up"><span class="bar indet"><i></i></span>Uploading…</span>';return;}
+  if(a.status==='error'){
+    el.innerHTML=`<button type="button" class="st err" title="${esc(a.err||'')}">Retry</button>`;
+    el.querySelector('button').onclick=()=>uploadOne(a);
+    return;
+  }
+  el.innerHTML=`<span class="nm">${esc(a.name)}</span><span class="st ok">✓</span>`;
 }
 
 $('#f').addEventListener('submit',async e=>{
@@ -351,13 +444,25 @@ $('#f').addEventListener('submit',async e=>{
   }
   if(!g('contractor')||!g('email')||!g('job')||!pm){toast('Please fill the required fields in section 1','err');return;}
 
+  /* Every expense row the contractor touched needs a category AND an amount — an
+     uncategorised line defeats the point of itemising, and a $0 line would quietly
+     vanish into the total. */
+  const exps=readExpenses();
+  for(const e of exps){
+    if(!e.category){toast('Pick a category for each expense','err');return;}
+    if(!(e.amount>0)){toast(`Enter an amount for the "${e.category}" expense`,'err');return;}
+  }
+  const laborAmt=amount, expTotal=exps.reduce((s,e)=>s+e.amount,0);
+  const expPayload=exps.map(e=>({category:e.category,amount:e.amount,desc:e.desc,
+    fileId:(e.att&&e.att.status==='done')?e.att.fileId:''}));
+
   const btn=$('#submitBtn');btn.disabled=true;
   btn.innerHTML='<span class="spin"></span> Submitting…';
   $('#submitHint').textContent='';
 
   /* Attachments started uploading when they were picked, so this is normally a
      no-op. If one is still in flight, wait on it rather than dropping it. */
-  const active=[...((mode==='file'&&invFile)?[invFile]:[]),...receipts];
+  const active=[...((mode==='file'&&invFile)?[invFile]:[]),...expenseAttachments()];
   const inFlight=active.filter(a=>a.status==='uploading');
   if(inFlight.length){
     btn.innerHTML='<span class="spin"></span> Finishing upload…';
@@ -370,11 +475,10 @@ $('#f').addEventListener('submit',async e=>{
 
   try{
     const payload={action:'submit',billingType:'production',entryType,contractor:g('contractor'),company:g('company'),email:g('email'),phone:g('phone'),
-      job:g('job'),pm,amount,invoiceNo,description,lineItems,notes:g('notes')};
+      job:g('job'),pm,amount:laborAmt+expTotal,laborAmount:laborAmt,expenses:expPayload,
+      invoiceNo,description,lineItems,notes:g('notes')};
     /* Files are already in Drive — send ids, not bytes. */
     if(mode==='file'&&invFile) payload.invoiceFileId=invFile.fileId;
-    const okRcpts=receipts.filter(r=>r.status==='done'&&r.fileId);
-    if(okRcpts.length) payload.receiptFileIds=okRcpts.map(r=>r.fileId);
 
     const res=await api(payload);
     if(res&&res.ok){

@@ -47,6 +47,33 @@ If domain sharing is ever refused (admin policy), `shareFolder_()` falls back to
 
 ---
 
+## Itemised expenses
+
+Section 3 of both forms is a line-item grid, not a pile of receipt files. Each row is **category + amount + optional description + optional receipt image**.
+
+Categories live in **two places that must stay in sync**: `EXPENSE_CATEGORIES` in `Code.gs` and `EXPENSE_CATS` in both HTML forms. Submit rejects any category not on the backend list, so adding an option to the form alone will bounce the submission with `Unknown expense category`.
+
+> Rental car · Public transport · Mileage · Per diem (P/D) · Hospitality · Lodging · Small equipment purchase · Equipment rental · Parking
+
+**The receipt is optional per row** — mileage and per diem normally have none. Category and a positive amount are required on any row the contractor touched; untouched rows are ignored, so a stray "+ Add an expense" click can't block a submission.
+
+**Expenses are reimbursable and add to the billed total.** `Amount` is the grand total (labor + expenses) — that's the number the Approved tab and the CRM show, so accounting pays one figure. The breakdown is kept alongside it:
+
+| Column | Meaning |
+|---|---|
+| `Amount` | **Grand total — what gets billed** (labor + expenses) |
+| `LaborAmount` | Hours grid total, or the invoice total the contractor typed |
+| `ExpensesTotal` | Sum of the expense rows |
+| `ExpensesJSON` | Full itemisation: category, amount, description, receipt URL |
+
+Totals are recomputed server-side; the client's arithmetic is never trusted. The form shows labor, expenses and total split out before submit, so a contractor who uploads an invoice that *already* includes expenses can see they'd be double-counting.
+
+Rows created before this change have blank expense columns and read back as labor-only, so old invoices are unaffected.
+
+**Adding a column later:** append to the END of `HEADERS` only. `COL` is index-based and the Approved tab's QUERY refers to columns positionally (`Col2`, `Col27`), so inserting in the middle silently rewires both. Then widen the range in `approvedFormula_()` (currently `A2:AD` = 30 columns) and run `setup()`, which rewrites the header row and refreshes the formula.
+
+---
+
 ## Attachments upload as they're picked
 
 Submitting is near-instant even with large files, because the bytes are already gone by the time anyone presses Submit.

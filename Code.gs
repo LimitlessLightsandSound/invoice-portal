@@ -69,11 +69,24 @@ const ACCENT = {
   approved:   '#1F7A4D'    // green
 };
 
+/* NOTE: 'Amount' is the GRAND TOTAL that gets billed — labor plus reimbursable
+   expenses. 'LaborAmount' and 'ExpensesTotal' are the breakdown, kept as their own
+   columns so a human reading the sheet doesn't have to do subtraction.
+   APPEND new columns at the END ONLY: COL is index-based, and the Approved tab's
+   QUERY refers to columns positionally (Col2, Col27, …), so inserting in the middle
+   silently rewires both. Adding at the end also means old rows just read blank. */
 const HEADERS = ['Timestamp','InvoiceID','Status','BillingType','Contractor','Company','Email','Phone',
   'Job','PM','EntryType','Amount','Ref/InvoiceNo','Description','LineItemsJSON',
   'Notes','InvoiceFileURL','ReceiptURLs',
   'Stage1By','Stage1At','Stage1Note','Stage2By','Stage2At','Stage2Note',
-  'BilledBy','BilledAt','BillRef'];
+  'BilledBy','BilledAt','BillRef',
+  'LaborAmount','ExpensesTotal','ExpensesJSON'];
+
+/* Reimbursable expense categories. The form's dropdown is built from this list, and
+   submit rejects anything not on it — otherwise the categories drift and the whole
+   point of itemising is lost. Keep in sync with EXPENSE_CATS in index/install.html. */
+const EXPENSE_CATEGORIES = ['Rental car','Public transport','Mileage','Per diem (P/D)',
+  'Hospitality','Lodging','Small equipment purchase','Equipment rental','Parking'];
 const COL = {}; HEADERS.forEach((h,i)=>COL[h]=i); // name -> 0-based index
 
 /***** WEB APP ENTRYPOINTS *****/
@@ -217,8 +230,31 @@ function submitInvoice(b){
            Math.random().toString(36).slice(2,6).toUpperCase();
 
   var entryType = b.entryType || 'hours';   // hours | file
-  var amount = Number(b.amount)||0;
   var lineItemsJson = b.lineItems ? JSON.stringify(b.lineItems) : '';
+
+  /* Expenses are itemised by category and REIMBURSABLE, so they add to what gets
+     billed. Totals are recomputed here rather than trusting the client's arithmetic.
+     Unknown categories are rejected — a free-text category defeats the itemising.
+     b.laborAmount is absent on older clients, which send only b.amount; falling back
+     to it keeps a stale cached form working (it just submits no expenses). */
+  var expenses = [];
+  var expensesTotal = 0;
+  if (Array.isArray(b.expenses)){
+    for (var ei=0; ei<b.expenses.length; ei++){
+      var e = b.expenses[ei] || {};
+      var cat = String(e.category||'').trim();
+      var amt = Number(e.amount)||0;
+      if (!cat && amt <= 0) continue;                       // blank row — ignore
+      if (EXPENSE_CATEGORIES.indexOf(cat) < 0){
+        return json({ ok:false, error:'Unknown expense category: ' + cat });
+      }
+      if (amt <= 0) return json({ ok:false, error:'Expense "' + cat + '" needs an amount.' });
+      expenses.push({ category:cat, amount:amt, desc:String(e.desc||''), fileId:String(e.fileId||''), url:'' });
+      expensesTotal += amt;
+    }
+  }
+  var laborAmount = (b.laborAmount != null) ? (Number(b.laborAmount)||0) : (Number(b.amount)||0);
+  var amount = laborAmount + expensesTotal;   // grand total — this is what gets billed
 
   /* Files: normally already in Drive via uploadFile, so we just claim them by id.
      The inline-b64 path stays as a fallback for a client whose background upload
@@ -227,8 +263,16 @@ function submitInvoice(b){
   if (b.invoiceFileId){ invoiceUrl = claimFile_(b.invoiceFileId, id+'_invoice'); }
   if (!invoiceUrl && b.invoiceFile && b.invoiceFile.b64){ invoiceUrl = saveFile_(getFolder_(), b.invoiceFile, id+'_invoice'); }
 
+  /* Each expense may carry its own receipt image. The url is stored ON the expense
+     (so the category, amount and its receipt travel together) and also collected
+     into ReceiptURLs, which is what the CRM console already reads. */
   var receiptUrls = [];
-  if (Array.isArray(b.receiptFileIds)){
+  expenses.forEach(function(e){
+    if (!e.fileId) return;
+    var u = claimFile_(e.fileId, id+'_receipt'+(receiptUrls.length+1));
+    if (u){ e.url = u; receiptUrls.push(u); }
+  });
+  if (Array.isArray(b.receiptFileIds)){          // legacy clients: bare receipts, no categories
     b.receiptFileIds.forEach(function(fid){
       var u = claimFile_(fid, id+'_receipt'+(receiptUrls.length+1));
       if (u) receiptUrls.push(u);
@@ -259,6 +303,9 @@ function submitInvoice(b){
   row[COL['Notes']]         = b.notes||'';
   row[COL['InvoiceFileURL']]= invoiceUrl;
   row[COL['ReceiptURLs']]   = receiptUrls.join(' ; ');
+  row[COL['LaborAmount']]   = laborAmount;
+  row[COL['ExpensesTotal']] = expensesTotal;
+  row[COL['ExpensesJSON']]  = expenses.length ? JSON.stringify(expenses) : '';
 
   sheet_(tabForType_(billingType)).appendRow(row);
   return json({ ok:true, id:id });
@@ -374,11 +421,7 @@ function ensureSheets_(){
   var ap = sheet_(APPROVED_TAB);
   if (ap.getLastRow()===0){
     ap.getRange('A1:I1').setValues([['InvoiceID','Type','Contractor','Job','PM','Amount','Invoice File','Status','Bill Ref']]);
-    // {Productions; Installs} stacked, then projected. Col order matches HEADERS (1-based): B,D,E,I,J,L,Q,C,AA
-    ap.getRange('A2').setFormula(
-      "=IFERROR(QUERY({'"+PRODUCTIONS_TAB+"'!A2:AA;'"+INSTALLS_TAB+"'!A2:AA}, " +
-      "\"select Col2,Col4,Col5,Col9,Col10,Col12,Col17,Col3,Col27 where Col3='approved' or Col3='billed' order by Col1 desc\", 0), )"
-    );
+    ap.getRange('A2').setFormula(approvedFormula_());
     styleApprovedTab_(ap);
   }
 }
@@ -388,6 +431,25 @@ function ensureSheets_(){
  * format rules and column widths over whole columns) and used to be re-applied on
  * every single submission. It now runs once at creation; use restyle() to
  * re-apply it on demand. */
+/* The Approved tab is a live QUERY stacking both data tabs. The source range must
+   span ALL of HEADERS — A..AD is 30 columns. If HEADERS grows again, widen this to
+   match, or the trailing columns are silently dropped from the stack. The projected
+   Col numbers are positional: Col2=InvoiceID, Col3=Status, Col27=BillRef. */
+function approvedFormula_(){
+  return "=IFERROR(QUERY({'"+PRODUCTIONS_TAB+"'!A2:AD;'"+INSTALLS_TAB+"'!A2:AD}, " +
+         "\"select Col2,Col4,Col5,Col9,Col10,Col12,Col17,Col3,Col27 " +
+         "where Col3='approved' or Col3='billed' order by Col1 desc\", 0), )";
+}
+
+/* HEADERS gains columns over time (the expense columns landed after launch). Rewrite
+   the header row so an already-built sheet picks them up. Run from setup() only —
+   it's a write per data tab, and the hot path must stay free of them. */
+function ensureHeaders_(){
+  DATA_TABS.forEach(function(name){
+    sheet_(name).getRange(1,1,1,HEADERS.length).setValues([HEADERS]);
+  });
+}
+
 function ensureDataTab_(name, accent){
   var sh = sheet_(name);
   if (sh.getLastRow()===0){
@@ -420,7 +482,9 @@ function styleDataTab_(sh, accent){
 
   // number / date formats (whole columns so appended rows inherit)
   sh.getRange('A:A').setNumberFormat('m/d/yyyy  h:mm');
-  sh.getRange(1, COL['Amount']+1,   maxRows, 1).setNumberFormat('$#,##0.00');
+  ['Amount','LaborAmount','ExpensesTotal'].forEach(function(h){
+    sh.getRange(1, COL[h]+1, maxRows, 1).setNumberFormat('$#,##0.00');
+  });
   [ 'Stage1At','Stage2At','BilledAt' ].forEach(function(h){
     sh.getRange(1, COL[h]+1, maxRows, 1).setNumberFormat('m/d/yyyy  h:mm');
   });
@@ -477,7 +541,8 @@ function setColWidths_(sh){
     'Ref/InvoiceNo':120,'Description':260,'LineItemsJSON':240,'Notes':220,
     'InvoiceFileURL':150,'ReceiptURLs':150,
     'Stage1By':110,'Stage1At':150,'Stage1Note':200,'Stage2By':110,'Stage2At':150,'Stage2Note':200,
-    'BilledBy':110,'BilledAt':150,'BillRef':130
+    'BilledBy':110,'BilledAt':150,'BillRef':130,
+    'LaborAmount':110,'ExpensesTotal':115,'ExpensesJSON':260
   };
   HEADERS.forEach(function(h){ if (w[h]) sh.setColumnWidth(COL[h]+1, w[h]); });
 }
@@ -494,6 +559,11 @@ function rowToObj_(r){
     lineItems: o['LineItemsJSON'] ? safeParse_(o['LineItemsJSON']) : null,
     notes:o['Notes'], invoiceFileUrl:o['InvoiceFileURL'],
     receiptUrls: o['ReceiptURLs'] ? String(o['ReceiptURLs']).split(' ; ').filter(Boolean) : [],
+    /* amount above is the grand total; these are the breakdown. Rows predating the
+       itemised-expenses change have blank cells, so they read as labor-only. */
+    laborAmount: o['LaborAmount']===''||o['LaborAmount']==null ? (Number(o['Amount'])||0) : (Number(o['LaborAmount'])||0),
+    expensesTotal: Number(o['ExpensesTotal'])||0,
+    expenses: o['ExpensesJSON'] ? (safeParse_(o['ExpensesJSON'])||[]) : [],
     stage1:{ by:o['Stage1By'], at: o['Stage1At']?new Date(o['Stage1At']).toISOString():'', note:o['Stage1Note'] },
     stage2:{ by:o['Stage2By'], at: o['Stage2At']?new Date(o['Stage2At']).toISOString():'', note:o['Stage2Note'] },
     billed:{ by:o['BilledBy'], at: o['BilledAt']?new Date(o['BilledAt']).toISOString():'', ref:o['BillRef'] }
@@ -671,6 +741,8 @@ function adoptFile_(fileId, baseName){
 /***** RUN ONCE *****/
 function setup(){
   ensureSheets_();
+  ensureHeaders_();                                              // pick up columns added since launch
+  sheet_(APPROVED_TAB).getRange('A2').setFormula(approvedFormula_());  // widen the QUERY to match
   restyle();                    // style existing tabs too, not just freshly created ones
   var sharing = shareFolder_();  // the ONLY place the folder gets shared — see getFolder_()
   var renamed = sweepRenames_(200);
