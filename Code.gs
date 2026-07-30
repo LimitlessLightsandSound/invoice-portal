@@ -33,22 +33,36 @@
  *************************************************************************/
 
 /***** CONFIG — REVIEWERS *****/
-/* role: owner = MASTER ADMIN (Dash) — sees everything and can do anything:
- *       approve / reject / escalate / reopen / bill, on either billing type, at any stage.
- * approver is scoped: 'production' (Tony) or 'install' (Gabe) — each sees only their type.
- * controller bills both types once approved. */
+/* There is ONE review step, not a stage-1/stage-2 chain. An invoice sits at
+ * "Awaiting review" — it is never addressed to a named person — and any reviewer
+ * who covers its billing type can approve, reject, or escalate it for a cross
+ * review. Escalating is a request for a second opinion, not a handoff up a ladder.
+ *
+ *   owner      — Dash. Reviews either type, and can also mark paid and reopen.
+ *   approver   — reviews. `scope` limits which billing type:
+ *                  Tony  : no scope  -> BOTH production and install
+ *                  Gabe  : 'install' -> install billing only
+ *   controller — Taryn / Accounting. Marks approved invoices paid. Never reviews,
+ *                so the person who pays is not also the person who approves. */
 const REVIEWERS = {
   'dash@limitlesslightsandsound.com'       : { role: 'owner',      name: 'Dash' },
-  'tony@limitlesslightsandsound.com'       : { role: 'approver',   name: 'Tony',       scope: 'production' },
+  'tony@limitlesslightsandsound.com'       : { role: 'approver',   name: 'Tony' },
   'gabe@limitlesslightsandsound.com'       : { role: 'approver',   name: 'Gabe',       scope: 'install' },
   'taryn@limitlesslightsandsound.com'      : { role: 'controller', name: 'Taryn' },
   'accounting@limitlesslightsandsound.com' : { role: 'controller', name: 'Accounting' }
 };
 
+/* Can this session review an invoice of `billingType`? Controllers never can —
+ * they only mark paid. An approver with no scope covers everything. */
+function canReview_(s, billingType){
+  if (!s) return false;
+  if (s.role === 'owner') return true;
+  if (s.role !== 'approver') return false;
+  return !s.scope || s.scope === billingType;
+}
+
 const DRIVE_FOLDER_NAME = 'Limitless — Contractor Invoices';
-const CODE_TTL_MIN      = 10;     // login code validity
 const SESSION_TTL_DAYS  = 30;     // how long a login lasts
-const MAX_CODE_ATTEMPTS = 5;      // brute-force guard
 const MAX_FILE_MB       = 10;     // per uploaded file
 
 /***** FIREBASE AUTH (used by the CRM invoices console) *****/
@@ -78,7 +92,7 @@ const ACCENT = {
 const HEADERS = ['Timestamp','InvoiceID','Status','BillingType','Contractor','Company','Email','Phone',
   'Job','PM','EntryType','Amount','Ref/InvoiceNo','Description','LineItemsJSON',
   'Notes','InvoiceFileURL','ReceiptURLs',
-  'Stage1By','Stage1At','Stage1Note','Stage2By','Stage2At','Stage2Note',
+  'ReviewedBy','ReviewedAt','ReviewNote','EscalatedBy','EscalatedAt','EscalationNote',
   'BilledBy','BilledAt','BillRef',
   'LaborAmount','ExpensesTotal','ExpensesJSON'];
 
@@ -101,8 +115,6 @@ function doPost(e){
     var action = body.action || '';
     switch(action){
       case 'firebaseLogin': return firebaseLogin(body); // CRM console sign-in
-      case 'requestCode': return requestCode(body);
-      case 'verifyCode' : return verifyCode(body);
       case 'uploadFile' : return uploadFile(body);      // PUBLIC (no token)
       case 'submit'     : return submitInvoice(body);   // PUBLIC (no token)
       case 'list'       : return listInvoices(body);    // token required
@@ -114,42 +126,12 @@ function doPost(e){
   }
 }
 
-/***** AUTH *****/
-function requestCode(b){
-  var email = String(b.email||'').trim().toLowerCase();
-  if (!REVIEWERS[email]) return json({ ok:false, error:'That email is not an authorized reviewer.' });
-  var code = String(Math.floor(100000 + Math.random()*900000));
-  var rec  = { code:code, exp: Date.now()+CODE_TTL_MIN*60000, tries:0 };
-  PropertiesService.getScriptProperties().setProperty('code_'+email, JSON.stringify(rec));
-  MailApp.sendEmail(
-    email,
-    'Your Limitless invoice portal code: ' + code,
-    'Your one-time sign-in code is ' + code + '\n\nIt expires in ' + CODE_TTL_MIN + ' minutes.\n\n— Limitless Lights & Sound'
-  );
-  return json({ ok:true });
-}
-
-function verifyCode(b){
-  var email = String(b.email||'').trim().toLowerCase();
-  var code  = String(b.code||'').trim();
-  var props = PropertiesService.getScriptProperties();
-  var raw   = props.getProperty('code_'+email);
-  if (!raw) return json({ ok:false, error:'No code requested. Request a new one.' });
-  var rec = JSON.parse(raw);
-  if (Date.now() > rec.exp){ props.deleteProperty('code_'+email); return json({ ok:false, error:'Code expired. Request a new one.' }); }
-  if (rec.tries >= MAX_CODE_ATTEMPTS){ props.deleteProperty('code_'+email); return json({ ok:false, error:'Too many attempts. Request a new code.' }); }
-  if (code !== rec.code){
-    rec.tries++; props.setProperty('code_'+email, JSON.stringify(rec));
-    return json({ ok:false, error:'Incorrect code.' });
-  }
-  props.deleteProperty('code_'+email);
-  var who = REVIEWERS[email];
-  var token = Utilities.getUuid();
-  var sess = { email:email, role:who.role, name:who.name, scope: who.scope||'', exp: Date.now()+SESSION_TTL_DAYS*86400000 };
-  props.setProperty('sess_'+token, JSON.stringify(sess));
-  return json({ ok:true, token:token, role:who.role, name:who.name, scope: who.scope||'', email:email });
-}
-
+/***** SIGN-IN — GOOGLE ONLY *****/
+/* There is deliberately NO email-code fallback. It was a second, weaker way into the
+ * same data: a 6-digit code, and a requestCode endpoint that let anyone on the internet
+ * fire sign-in mail at a reviewer's inbox. Reviewers reach this through the CRM, which
+ * already authenticates them with Google, so the codes bought nothing. Do not reinstate
+ * them — if Google sign-in ever breaks, fix that rather than adding a bypass. */
 /***** FIREBASE SIGN-IN (CRM invoices console) *****/
 // Client signs in with Google via Firebase, sends us the resulting ID token.
 // We validate it against THIS Firebase project, confirm the email is an allow-listed
@@ -317,14 +299,19 @@ function listInvoices(b){
   if (!s) return json({ ok:false, error:'Not signed in.' });
   ensureSheets_();
 
+  /* Scope mirrors canReview_: a controller sees only the billable pipeline, a SCOPED
+     approver (Gabe) sees just their type, and everyone else — the owner and an
+     unscoped approver like Tony — sees both. Checking `s.scope` for truth rather
+     than comparing it to 'install' matters: Tony has no scope, and the old
+     comparison quietly fell through to Productions-only for him. */
   var rows;
-  if (s.role === 'owner'){
-    rows = readData_(PRODUCTIONS_TAB).concat(readData_(INSTALLS_TAB));
-  } else if (s.role === 'approver'){
-    rows = readData_(s.scope === 'install' ? INSTALLS_TAB : PRODUCTIONS_TAB);
-  } else { // controller — billable pipeline across both types
+  if (s.role === 'controller'){
     rows = readData_(PRODUCTIONS_TAB).concat(readData_(INSTALLS_TAB))
              .filter(function(x){ return x.status==='approved' || x.status==='billed'; });
+  } else if (s.role === 'approver' && s.scope){
+    rows = readData_(s.scope === 'install' ? INSTALLS_TAB : PRODUCTIONS_TAB);
+  } else {
+    rows = readData_(PRODUCTIONS_TAB).concat(readData_(INSTALLS_TAB));
   }
   rows.sort(function(a,c){ return String(c.submitted||'').localeCompare(String(a.submitted||'')); }); // newest first
   return json({ ok:true, role:s.role, name:s.name, scope:s.scope||'', invoices: rows });
@@ -338,10 +325,21 @@ function readData_(tab){
 }
 
 /***** ACT (token) *****/
+/* ONE read and ONE write.
+ *
+ * This used to do ~8 separate Sheets round trips per action — two getValue()s, up to
+ * four setValue()s, plus findInvoice_ scanning the ID column of both tabs — and the
+ * client then refetched the WHOLE list before the UI moved. Measured end to end that
+ * was ~4s for anything and ~7s for a reject. Now: fetch the row once, mutate the
+ * array in memory, write it back once, and RETURN the updated invoice so the client
+ * has no reason to refetch at all.
+ *
+ * Review model: a single review step. Anyone who covers the billing type
+ * (canReview_) can approve / reject / escalate whatever is still open. Escalate
+ * flags it for a cross review; it does not hand it to a particular person. */
 function actOnInvoice(b){
   var s = session(b.token);
   if (!s) return json({ ok:false, error:'Not signed in.' });
-  // doPost routes on body.action ('act'); the verb (approve/escalate/reject/billed/reopen) is in b.verb
   var id = b.id, act = b.verb, note = b.note||'', billRef = b.billRef||'';
   if (!id || !act) return json({ ok:false, error:'Missing id or action.' });
 
@@ -349,57 +347,91 @@ function actOnInvoice(b){
   if (!found) return json({ ok:false, error:'Invoice not found.' });
   var sh = found.sh, rowIdx = found.rowIdx;
 
-  var billingType = sh.getRange(rowIdx, COL['BillingType']+1).getValue() || 'production';
-  // approvers are scoped to their billing type
-  if (s.role === 'approver' && s.scope && billingType !== s.scope){
-    return json({ ok:false, error:'That item is outside your queue.' });
-  }
-
-  var status = sh.getRange(rowIdx, COL['Status']+1).getValue();
+  var range = sh.getRange(rowIdx, 1, 1, HEADERS.length);
+  var row = range.getValues()[0];                      // <-- the ONLY read
+  var billingType = row[COL['BillingType']] || 'production';
+  var status = String(row[COL['Status']]||'');
   var now = new Date();
-  var stamp = function(byCol,atCol,noteCol){
-    sh.getRange(rowIdx, byCol+1).setValue(s.name);
-    sh.getRange(rowIdx, atCol+1).setValue(now);
-    if (noteCol!=null) sh.getRange(rowIdx, noteCol+1).setValue(note);
-  };
-  var setStatus = function(v){ sh.getRange(rowIdx, COL['Status']+1).setValue(v); };
 
-  // permission matrix
-  var allowed = false;
-  if (act==='approve'){
-    if (s.role==='approver' && status==='pending'){ stamp(COL['Stage1By'],COL['Stage1At'],COL['Stage1Note']); setStatus('approved'); allowed=true; }
-    else if (s.role==='owner'){ // owner can approve at any stage
-      if (status==='escalated' || status==='pending'){ stamp(COL['Stage2By'],COL['Stage2At'],COL['Stage2Note']); setStatus('approved'); allowed=true; }
-    }
-  } else if (act==='escalate'){
-    if ((s.role==='approver' || s.role==='owner') && status==='pending'){ stamp(COL['Stage1By'],COL['Stage1At'],COL['Stage1Note']); setStatus('escalated'); allowed=true; }
-  } else if (act==='reject'){
-    if (s.role==='approver' && status==='pending'){ stamp(COL['Stage1By'],COL['Stage1At'],COL['Stage1Note']); setStatus('rejected'); allowed=true; }
-    else if (s.role==='owner' && (status==='pending'||status==='escalated'||status==='approved')){ stamp(COL['Stage2By'],COL['Stage2At'],COL['Stage2Note']); setStatus('rejected'); allowed=true; }
-  } else if (act==='billed'){
-    // controllers bill; owner (master admin) can also bill
-    if ((s.role==='controller' || s.role==='owner') && status==='approved'){
-      sh.getRange(rowIdx, COL['BilledBy']+1).setValue(s.name);
-      sh.getRange(rowIdx, COL['BilledAt']+1).setValue(now);
-      sh.getRange(rowIdx, COL['BillRef']+1).setValue(billRef);
-      setStatus('billed'); allowed=true;
-    }
-  } else if (act==='reopen'){
-    if (s.role==='owner'){ setStatus('pending'); allowed=true; } // send back to the approver
+  var reviewer = canReview_(s, billingType);
+  var isOpen = (status === 'pending' || status === 'escalated');
+
+  function stampReview(next){
+    row[COL['ReviewedBy']] = s.name; row[COL['ReviewedAt']] = now; row[COL['ReviewNote']] = note;
+    row[COL['Status']] = next;
   }
 
-  if (!allowed) return json({ ok:false, error:'Not permitted for your role at this stage.' });
-  return json({ ok:true });
+  var allowed = false;
+  if (act === 'approve'){
+    if (reviewer && isOpen){ stampReview('approved'); allowed = true; }
+  } else if (act === 'reject'){
+    // an approved-but-unpaid invoice can still be pulled back
+    if (reviewer && (isOpen || status === 'approved')){ stampReview('rejected'); allowed = true; }
+  } else if (act === 'escalate'){
+    if (reviewer && status === 'pending'){
+      row[COL['EscalatedBy']] = s.name; row[COL['EscalatedAt']] = now; row[COL['EscalationNote']] = note;
+      row[COL['Status']] = 'escalated'; allowed = true;
+    }
+  } else if (act === 'billed'){
+    if ((s.role === 'controller' || s.role === 'owner') && status === 'approved'){
+      row[COL['BilledBy']] = s.name; row[COL['BilledAt']] = now; row[COL['BillRef']] = billRef;
+      row[COL['Status']] = 'billed'; allowed = true;
+    }
+  } else if (act === 'reopen'){
+    /* Reopening a BILLED invoice unwinds a payment record, so that stays with the
+       owner. Anything else a reviewer can put back in the queue. */
+    if (status === 'billed' ? (s.role === 'owner') : reviewer){
+      row[COL['Status']] = 'pending'; allowed = true;
+    }
+  }
+
+  if (!allowed){
+    if (!reviewer && act !== 'billed'){
+      return json({ ok:false, error: s.role === 'controller'
+        ? 'Controllers mark invoices paid; they do not approve them.'
+        : 'That billing type is outside your queue.' });
+    }
+    return json({ ok:false, error:'That action is not available at this stage.' });
+  }
+
+  range.setValues([row]);                              // <-- the ONLY write
+  return json({ ok:true, invoice: rowToObj_(row) });    // client updates in place; no refetch
 }
 
-// Search both data tabs for an InvoiceID. Returns {sh, rowIdx} (1-based row) or null.
+/* Locate an invoice by id. Returns {sh, rowIdx} (1-based) or null.
+ *
+ * The scan reads the whole InvoiceID column of BOTH tabs, so it's cached: a hit
+ * costs one single-cell read instead. The cached row is always re-verified, because
+ * deleting a row above shifts every index below it — on a mismatch we fall back to
+ * the scan and re-cache. The cache is a speed-up, never a source of truth. */
 function findInvoice_(id){
+  var cache = null, key = 'row_' + id;
+  try { cache = CacheService.getScriptCache(); } catch(e){}
+
+  if (cache){
+    var hit = cache.get(key);
+    if (hit){
+      var parts = String(hit).split('|');
+      try{
+        var csh = sheet_(parts[0]), crow = Number(parts[1]);
+        if (crow >= 2 && csh.getRange(crow, COL['InvoiceID']+1).getValue() === id){
+          return { sh:csh, rowIdx:crow };
+        }
+      }catch(e){ /* tab renamed or row gone — fall through to the scan */ }
+    }
+  }
+
   for (var t=0; t<DATA_TABS.length; t++){
     var sh = sheet_(DATA_TABS[t]);
     var last = sh.getLastRow();
     if (last < 2) continue;
     var ids = sh.getRange(2, COL['InvoiceID']+1, last-1, 1).getValues();
-    for (var i=0;i<ids.length;i++){ if (ids[i][0]===id){ return { sh:sh, rowIdx:i+2 }; } }
+    for (var i=0;i<ids.length;i++){
+      if (ids[i][0]===id){
+        if (cache){ try { cache.put(key, DATA_TABS[t]+'|'+(i+2), 21600); } catch(e){} }
+        return { sh:sh, rowIdx:i+2 };
+      }
+    }
   }
   return null;
 }
@@ -485,7 +517,7 @@ function styleDataTab_(sh, accent){
   ['Amount','LaborAmount','ExpensesTotal'].forEach(function(h){
     sh.getRange(1, COL[h]+1, maxRows, 1).setNumberFormat('$#,##0.00');
   });
-  [ 'Stage1At','Stage2At','BilledAt' ].forEach(function(h){
+  [ 'ReviewedAt','EscalatedAt','BilledAt' ].forEach(function(h){
     sh.getRange(1, COL[h]+1, maxRows, 1).setNumberFormat('m/d/yyyy  h:mm');
   });
   // re-bold the header amount/date cells that the number-format pass left plain
@@ -540,7 +572,7 @@ function setColWidths_(sh){
     'Company':140,'Email':210,'Phone':120,'Job':190,'PM':130,'EntryType':100,'Amount':110,
     'Ref/InvoiceNo':120,'Description':260,'LineItemsJSON':240,'Notes':220,
     'InvoiceFileURL':150,'ReceiptURLs':150,
-    'Stage1By':110,'Stage1At':150,'Stage1Note':200,'Stage2By':110,'Stage2At':150,'Stage2Note':200,
+    'ReviewedBy':115,'ReviewedAt':150,'ReviewNote':200,'EscalatedBy':115,'EscalatedAt':150,'EscalationNote':200,
     'BilledBy':110,'BilledAt':150,'BillRef':130,
     'LaborAmount':110,'ExpensesTotal':115,'ExpensesJSON':260
   };
@@ -564,8 +596,13 @@ function rowToObj_(r){
     laborAmount: o['LaborAmount']===''||o['LaborAmount']==null ? (Number(o['Amount'])||0) : (Number(o['LaborAmount'])||0),
     expensesTotal: Number(o['ExpensesTotal'])||0,
     expenses: o['ExpensesJSON'] ? (safeParse_(o['ExpensesJSON'])||[]) : [],
-    stage1:{ by:o['Stage1By'], at: o['Stage1At']?new Date(o['Stage1At']).toISOString():'', note:o['Stage1Note'] },
-    stage2:{ by:o['Stage2By'], at: o['Stage2At']?new Date(o['Stage2At']).toISOString():'', note:o['Stage2Note'] },
+    /* One review stamp, not a stage-1/stage-2 chain: whoever approved or rejected it.
+       `escalated` records who asked for a cross review, if anyone did. stage1/stage2 are
+       kept as aliases so an older cached CRM bundle doesn't render blanks mid-rollout. */
+    reviewed:{ by:o['ReviewedBy'], at: o['ReviewedAt']?new Date(o['ReviewedAt']).toISOString():'', note:o['ReviewNote'] },
+    escalated:{ by:o['EscalatedBy'], at: o['EscalatedAt']?new Date(o['EscalatedAt']).toISOString():'', note:o['EscalationNote'] },
+    stage1:{ by:o['ReviewedBy'], at: o['ReviewedAt']?new Date(o['ReviewedAt']).toISOString():'', note:o['ReviewNote'] },
+    stage2:{ by:o['EscalatedBy'], at: o['EscalatedAt']?new Date(o['EscalatedAt']).toISOString():'', note:o['EscalationNote'] },
     billed:{ by:o['BilledBy'], at: o['BilledAt']?new Date(o['BilledAt']).toISOString():'', ref:o['BillRef'] }
   };
 }

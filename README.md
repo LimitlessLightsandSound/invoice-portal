@@ -149,4 +149,23 @@ So the flow is: **contractor form → Apps Script → Sheet + Drive → CRM invo
 
 **While `VITE_INVOICE_API_URL` is unset, the CRM invoices page runs on in-memory fixtures** (`src/invoices/fixtures.ts`) — it looks fully populated but none of it is real. That's deliberate: it keeps demo builds, unit tests, and the Playwright e2e suite off the live Apps Script. It also means "the invoices page works" is not evidence the connection is live. Check for a real invoice you submitted yourself.
 
-The email-code endpoints (`requestCode` / `verifyCode`) are the older sign-in path and currently have no caller now that the standalone console is gone. They're harmless to keep as a backdoor if Firebase auth ever breaks.
+**The email one-time-code sign-in has been removed.** It was a second, weaker way into the same data — a 6-digit code, plus a `requestCode` endpoint that let anyone on the internet fire sign-in mail at a reviewer's inbox. Reviewers reach this through the CRM, which already authenticates them with Google, so the codes bought nothing. Don't reinstate them: if Google sign-in breaks, fix that rather than adding a bypass.
+
+---
+
+## Who can review what
+
+One review step. An invoice sits at **"Awaiting review"** and is never addressed to a named person — there is no stage-1/stage-2 chain. Escalating asks for a **cross review** (a second opinion); it does not advance the invoice to a second gate, so an escalated invoice is still awaiting review.
+
+| | Reviews production | Reviews install | Marks paid |
+|---|---|---|---|
+| Dash (owner) | ✅ | ✅ | ✅ |
+| Tony (approver, no scope) | ✅ | ✅ | — |
+| Gabe (approver, `scope: 'install'`) | — | ✅ | — |
+| Taryn / Accounting (controller) | — | — | ✅ |
+
+Controllers deliberately can't approve — the person who pays isn't the person who approves. Reopening a **billed** invoice is owner-only, since it unwinds a payment record; anything else a reviewer can put back in the queue.
+
+`canReview_(session, billingType)` is the single source of truth, and `listInvoices` mirrors it: a scoped approver sees only their tab, everyone else sees both.
+
+Stamps are `ReviewedBy/At/Note` (whoever approved or rejected) and `EscalatedBy/At/Note` (whoever asked for the cross review).
