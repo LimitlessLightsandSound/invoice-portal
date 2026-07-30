@@ -42,15 +42,24 @@
  *   approver   — reviews. `scope` limits which billing type:
  *                  Tony  : no scope  -> BOTH production and install
  *                  Gabe  : 'install' -> install billing only
- *   controller — Taryn / Accounting. Marks approved invoices paid. Never reviews,
- *                so the person who pays is not also the person who approves. */
+ *   controller — Taryn / Accounting. Marks approved invoices paid, never reviews.
+ *
+ * `pay: true` grants marking-paid on top of a role. Tony has it (Dash's call), so he
+ * can both approve an invoice and pay it — there is deliberately no separation of
+ * duties for him. Everyone else who pays (the controllers) cannot approve. */
 const REVIEWERS = {
   'dash@limitlesslightsandsound.com'       : { role: 'owner',      name: 'Dash' },
-  'tony@limitlesslightsandsound.com'       : { role: 'approver',   name: 'Tony' },
+  'tony@limitlesslightsandsound.com'       : { role: 'approver',   name: 'Tony',       pay: true },
   'gabe@limitlesslightsandsound.com'       : { role: 'approver',   name: 'Gabe',       scope: 'install' },
   'taryn@limitlesslightsandsound.com'      : { role: 'controller', name: 'Taryn' },
   'accounting@limitlesslightsandsound.com' : { role: 'controller', name: 'Accounting' }
 };
+
+/* Can this session mark an approved invoice paid? Controllers and the owner always
+ * can; anyone else needs an explicit `pay: true` in REVIEWERS. */
+function canPay_(s){
+  return !!s && (s.role === 'owner' || s.role === 'controller' || !!s.pay);
+}
 
 /* Can this session review an invoice of `billingType`? Controllers never can —
  * they only mark paid. An approver with no scope covers everything. */
@@ -146,9 +155,9 @@ function firebaseLogin(b){
   var who = REVIEWERS[email];
   if (!who) return json({ ok:false, error:'That account is not on the reviewer allow-list.' });
   var token = Utilities.getUuid();
-  var sess = { email:email, role:who.role, name:who.name, scope: who.scope||'', exp: Date.now()+SESSION_TTL_DAYS*86400000 };
+  var sess = { email:email, role:who.role, name:who.name, scope: who.scope||'', pay: !!who.pay, exp: Date.now()+SESSION_TTL_DAYS*86400000 };
   PropertiesService.getScriptProperties().setProperty('sess_'+token, JSON.stringify(sess));
-  return json({ ok:true, token:token, role:who.role, name:who.name, scope: who.scope||'', email:email });
+  return json({ ok:true, token:token, role:who.role, name:who.name, scope: who.scope||'', pay: !!who.pay, email:email });
 }
 
 // Validate a Firebase ID token via Identity Toolkit. Returns {email, emailVerified} or null.
@@ -314,7 +323,7 @@ function listInvoices(b){
     rows = readData_(PRODUCTIONS_TAB).concat(readData_(INSTALLS_TAB));
   }
   rows.sort(function(a,c){ return String(c.submitted||'').localeCompare(String(a.submitted||'')); }); // newest first
-  return json({ ok:true, role:s.role, name:s.name, scope:s.scope||'', invoices: rows });
+  return json({ ok:true, role:s.role, name:s.name, scope:s.scope||'', pay: !!s.pay, invoices: rows });
 }
 
 function readData_(tab){
@@ -373,7 +382,7 @@ function actOnInvoice(b){
       row[COL['Status']] = 'escalated'; allowed = true;
     }
   } else if (act === 'billed'){
-    if ((s.role === 'controller' || s.role === 'owner') && status === 'approved'){
+    if (canPay_(s) && status === 'approved'){
       row[COL['BilledBy']] = s.name; row[COL['BilledAt']] = now; row[COL['BillRef']] = billRef;
       row[COL['Status']] = 'billed'; allowed = true;
     }
