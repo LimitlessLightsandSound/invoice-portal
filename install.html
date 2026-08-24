@@ -158,10 +158,7 @@
         <div class="field"><label>Email<span class="req">*</span></label><input name="email" type="email" required placeholder="you@email.com"></div>
         <div class="field"><label>Phone <span class="hint">(optional)</span></label><input name="phone" placeholder="(555) 000-0000"></div>
         <div class="field"><label>Job #<span class="req">*</span></label><input name="job" required placeholder="As listed on the gig in your Lasso app"></div>
-        <div class="field"><label>Project Manager<span class="req">*</span></label>
-          <select name="pm" required><option value="">Select PM…</option><option>Dash Speer</option><option>Robby Wall</option><option>Austin Tingle</option><option>Sean Pauw</option><option>Jake Stigliano</option><option>Wilmar Bermudez</option><option>Alex Figeuroa</option><option value="__other__">Other (type below)</option></select>
-        </div>
-        <div class="field" id="pmOtherWrap" style="display:none"><label>PM name</label><input name="pmOther" placeholder="Enter PM name"></div>
+        <div class="field"><label>Project Manager<span class="req">*</span></label><input name="pm" required placeholder="PM name"></div>
       </div>
     </div>
 
@@ -295,8 +292,6 @@ function render(){
   const rb=$('#invFileBox [data-retry]');if(rb)rb.onclick=()=>{if(invFile)uploadOne(invFile);};
   recalc();
 }
-
-$('select[name=pm]').onchange=function(){$('#pmOtherWrap').style.display=this.value==='__other__'?'flex':'none';};
 
 let mode='hours';
 $$('.mode-btn').forEach(b=>b.onclick=()=>{
@@ -443,7 +438,7 @@ $('#f').addEventListener('submit',async e=>{
   e.preventDefault();
   if(API.indexOf('PASTE_')===0){toast('Backend URL not set yet (see SETUP)','err');return;}
   const g=n=>$('#f').elements[n]?.value.trim()||'';
-  let pm=g('pm'); if(pm==='__other__') pm=g('pmOther')||'Other';
+  const pm=g('pm');
 
   let entryType=mode, amount=0, invoiceNo='', description='', lineItems=null;
   if(mode==='file'){
