@@ -61,6 +61,12 @@ function canPay_(s){
   return !!s && (s.role === 'owner' || s.role === 'controller' || !!s.pay);
 }
 
+/* Can this session archive/unarchive a bill (INV-020)? Filing is ledger work, not review,
+ * so it belongs to the people who own the ledger: the owner and the controllers. */
+function canArchive_(s){
+  return !!s && (s.role === 'owner' || s.role === 'controller');
+}
+
 /* Can this session review an invoice of `billingType`? Controllers never can —
  * they only mark paid. An approver with no scope covers everything. */
 function canReview_(s, billingType){
@@ -103,7 +109,8 @@ const HEADERS = ['Timestamp','InvoiceID','Status','BillingType','Contractor','Co
   'Notes','InvoiceFileURL','ReceiptURLs',
   'ReviewedBy','ReviewedAt','ReviewNote','EscalatedBy','EscalatedAt','EscalationNote',
   'BilledBy','BilledAt','BillRef',
-  'LaborAmount','ExpensesTotal','ExpensesJSON'];
+  'LaborAmount','ExpensesTotal','ExpensesJSON',
+  'Archived'];   // INV-020 — 'yes' = filed out of the working set; blank = live. Col AE / Col31.
 
 /* Reimbursable expense categories. The form's dropdown is built from this list, and
    submit rejects anything not on it — otherwise the categories drift and the whole
@@ -128,6 +135,7 @@ function doPost(e){
       case 'submit'     : return submitInvoice(body);   // PUBLIC (no token)
       case 'list'       : return listInvoices(body);    // token required
       case 'act'        : return actOnInvoice(body);    // token required
+      case 'archiveSweep': return archiveSweep(body);   // token required (INV-020 bulk archive)
       default           : return json({ ok:false, error:'Unknown action' });
     }
   }catch(err){
@@ -322,6 +330,11 @@ function listInvoices(b){
   } else {
     rows = readData_(PRODUCTIONS_TAB).concat(readData_(INSTALLS_TAB));
   }
+  /* INV-020: archived bills are out of the working set by default. The CRM console opts in
+     with includeArchived:true and separates them client-side; every other caller stays lean. */
+  if (b.includeArchived !== true){
+    rows = rows.filter(function(x){ return !x.archived; });
+  }
   rows.sort(function(a,c){ return String(c.submitted||'').localeCompare(String(a.submitted||'')); }); // newest first
   return json({ ok:true, role:s.role, name:s.name, scope:s.scope||'', pay: !!s.pay, invoices: rows });
 }
@@ -392,10 +405,24 @@ function actOnInvoice(b){
     if (status === 'billed' ? (s.role === 'owner') : reviewer){
       row[COL['Status']] = 'pending'; allowed = true;
     }
+  } else if (act === 'archive'){
+    /* INV-020 — filing, not review: only a TERMINAL bill (paid/rejected) leaves the working
+       set, and only the ledger owners file it. Status is untouched — Archived is its own
+       column, so the audit trail keeps saying what happened to the bill. */
+    if (canArchive_(s) && (status === 'billed' || status === 'rejected')){
+      row[COL['Archived']] = 'yes'; allowed = true;
+    }
+  } else if (act === 'unarchive'){
+    if (canArchive_(s) && String(row[COL['Archived']]||'').toLowerCase() === 'yes'){
+      row[COL['Archived']] = ''; allowed = true;
+    }
   }
 
   if (!allowed){
-    if (!reviewer && act !== 'billed'){
+    if ((act === 'archive' || act === 'unarchive') && !canArchive_(s)){
+      return json({ ok:false, error:'Only the owner or accounting can archive bills.' });
+    }
+    if (!reviewer && act !== 'billed' && act !== 'archive' && act !== 'unarchive'){
       return json({ ok:false, error: s.role === 'controller'
         ? 'Controllers mark invoices paid; they do not approve them.'
         : 'That billing type is outside your queue.' });
@@ -405,6 +432,40 @@ function actOnInvoice(b){
 
   range.setValues([row]);                              // <-- the ONLY write
   return json({ ok:true, invoice: rowToObj_(row) });    // client updates in place; no refetch
+}
+
+/***** ARCHIVE SWEEP (token) — INV-020 *****/
+/* The 3–6-month filing ritual: mark every Paid/Rejected bill older than `months` archived in
+ * one pass. Same read/write discipline as act, per tab: one getValues, one setValues (only
+ * when something changed). Age is measured from the bill's terminal stamp — BilledAt for
+ * paid, ReviewedAt for rejected — falling back to the submission Timestamp on a legacy row
+ * with no stamp. Rows are never moved or deleted, so findInvoice_'s row cache stays valid. */
+function archiveSweep(b){
+  var s = session(b.token);
+  if (!s) return json({ ok:false, error:'Not signed in.' });
+  if (!canArchive_(s)) return json({ ok:false, error:'Only the owner or accounting can archive bills.' });
+  var months = Number(b.months) || 3;
+  var cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months);
+  var archived = 0;
+  DATA_TABS.forEach(function(name){
+    var sh = sheet_(name);
+    var last = sh.getLastRow();
+    if (last < 2) return;
+    var range = sh.getRange(2, 1, last-1, HEADERS.length);
+    var rows = range.getValues();                        // one read per tab
+    var dirty = false;
+    rows.forEach(function(row){
+      var status = String(row[COL['Status']]||'');
+      if (status !== 'billed' && status !== 'rejected') return;
+      if (String(row[COL['Archived']]||'').toLowerCase() === 'yes') return;
+      var stamp = status === 'billed' ? row[COL['BilledAt']] : row[COL['ReviewedAt']];
+      var when = stamp ? new Date(stamp) : (row[COL['Timestamp']] ? new Date(row[COL['Timestamp']]) : null);
+      if (!when || isNaN(when.getTime()) || when > cutoff) return;
+      row[COL['Archived']] = 'yes'; archived++; dirty = true;
+    });
+    if (dirty) range.setValues(rows);                    // one write per tab, only if needed
+  });
+  return json({ ok:true, archived: archived });
 }
 
 /* Locate an invoice by id. Returns {sh, rowIdx} (1-based) or null.
@@ -477,9 +538,11 @@ function ensureSheets_(){
    match, or the trailing columns are silently dropped from the stack. The projected
    Col numbers are positional: Col2=InvoiceID, Col3=Status, Col27=BillRef. */
 function approvedFormula_(){
-  return "=IFERROR(QUERY({'"+PRODUCTIONS_TAB+"'!A2:AD;'"+INSTALLS_TAB+"'!A2:AD}, " +
+  /* Col31 is Archived (INV-020). Blank cells are NULL to QUERY — a bare `Col31 <> 'yes'`
+     would fail for them and empty the whole tab, hence the explicit `is null` half. */
+  return "=IFERROR(QUERY({'"+PRODUCTIONS_TAB+"'!A2:AE;'"+INSTALLS_TAB+"'!A2:AE}, " +
          "\"select Col2,Col4,Col5,Col9,Col10,Col12,Col17,Col3,Col27 " +
-         "where Col3='approved' or Col3='billed' order by Col1 desc\", 0), )";
+         "where (Col3='approved' or Col3='billed') and (Col31 is null or Col31 <> 'yes') order by Col1 desc\", 0), )";
 }
 
 /* HEADERS gains columns over time (the expense columns landed after launch). Rewrite
@@ -583,7 +646,8 @@ function setColWidths_(sh){
     'InvoiceFileURL':150,'ReceiptURLs':150,
     'ReviewedBy':115,'ReviewedAt':150,'ReviewNote':200,'EscalatedBy':115,'EscalatedAt':150,'EscalationNote':200,
     'BilledBy':110,'BilledAt':150,'BillRef':130,
-    'LaborAmount':110,'ExpensesTotal':115,'ExpensesJSON':260
+    'LaborAmount':110,'ExpensesTotal':115,'ExpensesJSON':260,
+    'Archived':90
   };
   HEADERS.forEach(function(h){ if (w[h]) sh.setColumnWidth(COL[h]+1, w[h]); });
 }
@@ -612,7 +676,9 @@ function rowToObj_(r){
     escalated:{ by:o['EscalatedBy'], at: o['EscalatedAt']?new Date(o['EscalatedAt']).toISOString():'', note:o['EscalationNote'] },
     stage1:{ by:o['ReviewedBy'], at: o['ReviewedAt']?new Date(o['ReviewedAt']).toISOString():'', note:o['ReviewNote'] },
     stage2:{ by:o['EscalatedBy'], at: o['EscalatedAt']?new Date(o['EscalatedAt']).toISOString():'', note:o['EscalationNote'] },
-    billed:{ by:o['BilledBy'], at: o['BilledAt']?new Date(o['BilledAt']).toISOString():'', ref:o['BillRef'] }
+    billed:{ by:o['BilledBy'], at: o['BilledAt']?new Date(o['BilledAt']).toISOString():'', ref:o['BillRef'] },
+    /* INV-020: rows predating the Archived column read blank -> false (live). */
+    archived: String(o['Archived']||'').toLowerCase() === 'yes'
   };
 }
 function safeParse_(s){ try{return JSON.parse(s);}catch(e){return null;} }
