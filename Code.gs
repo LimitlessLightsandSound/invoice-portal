@@ -444,27 +444,41 @@ function archiveSweep(b){
   var s = session(b.token);
   if (!s) return json({ ok:false, error:'Not signed in.' });
   if (!canArchive_(s)) return json({ ok:false, error:'Only the owner or accounting can archive bills.' });
-  var months = Number(b.months) || 3;
+  var months = Number(b.months);
+  if (!isFinite(months) || months < 0) months = 3;
   var cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months);
+  /* A controller's list never shows rejected bills (listInvoices scopes them to the billable
+     pipeline), so their sweep must not silently file rows they cannot see or recover. The
+     owner sweeps both terminal states — this keeps the console's confirm count honest. */
+  var sweepable = s.role === 'controller' ? { billed:true } : { billed:true, rejected:true };
   var archived = 0;
-  DATA_TABS.forEach(function(name){
-    var sh = sheet_(name);
-    var last = sh.getLastRow();
-    if (last < 2) return;
-    var range = sh.getRange(2, 1, last-1, HEADERS.length);
-    var rows = range.getValues();                        // one read per tab
-    var dirty = false;
-    rows.forEach(function(row){
-      var status = String(row[COL['Status']]||'');
-      if (status !== 'billed' && status !== 'rejected') return;
-      if (String(row[COL['Archived']]||'').toLowerCase() === 'yes') return;
-      var stamp = status === 'billed' ? row[COL['BilledAt']] : row[COL['ReviewedAt']];
-      var when = stamp ? new Date(stamp) : (row[COL['Timestamp']] ? new Date(row[COL['Timestamp']]) : null);
-      if (!when || isNaN(when.getTime()) || when > cutoff) return;
-      row[COL['Archived']] = 'yes'; archived++; dirty = true;
+  /* Serialise against a concurrent act(): the sweep is a read-modify-write over whole tabs,
+     and it writes back ONLY the Archived column — a whole-row setValues here would restore
+     stale pre-read values into every other cell (undoing an approve that landed mid-sweep). */
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    DATA_TABS.forEach(function(name){
+      var sh = sheet_(name);
+      var last = sh.getLastRow();
+      if (last < 2) return;
+      var rows = sh.getRange(2, 1, last-1, HEADERS.length).getValues();  // one read per tab
+      var flags = [], dirty = false;
+      rows.forEach(function(row){
+        var current = row[COL['Archived']];
+        var status = String(row[COL['Status']]||'');
+        var already = String(current||'').toLowerCase() === 'yes';
+        if (!sweepable[status] || already){ flags.push([current]); return; }
+        var stamp = status === 'billed' ? row[COL['BilledAt']] : row[COL['ReviewedAt']];
+        var when = stamp ? new Date(stamp) : (row[COL['Timestamp']] ? new Date(row[COL['Timestamp']]) : null);
+        if (!when || isNaN(when.getTime()) || when > cutoff){ flags.push([current]); return; }
+        flags.push(['yes']); archived++; dirty = true;
+      });
+      if (dirty) sh.getRange(2, COL['Archived']+1, last-1, 1).setValues(flags); // Archived col ONLY
     });
-    if (dirty) range.setValues(rows);                    // one write per tab, only if needed
-  });
+  } finally {
+    lock.releaseLock();
+  }
   return json({ ok:true, archived: archived });
 }
 
