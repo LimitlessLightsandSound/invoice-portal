@@ -111,7 +111,13 @@ const HEADERS = ['Timestamp','InvoiceID','Status','BillingType','Contractor','Co
   'ReviewedBy','ReviewedAt','ReviewNote','EscalatedBy','EscalatedAt','EscalationNote',
   'BilledBy','BilledAt','BillRef',
   'LaborAmount','ExpensesTotal','ExpensesJSON',
-  'Archived'];   // INV-020 — 'yes' = filed out of the working set; blank = live. Col AE / Col31.
+  'Archived',    // INV-020 — 'yes' = filed out of the working set; blank = live. Col AE / Col31.
+  /* INV-022 — internal adjustments (verbal price changes). The contractor's SUBMISSION is
+     immutable: LineItemsJSON and LaborAmount are never rewritten. An edit stores the current
+     adjusted lines/labor here, appends to the AdjLog audit trail (who/when/why, old → new),
+     and updates 'Amount' to the CURRENT billed total (adjusted labor + expenses) so the
+     Approved tab and the console keep paying one figure. Blank = never adjusted. */
+  'AdjLineItemsJSON','AdjLaborAmount','AdjLogJSON'];   // Cols AF–AH / Col32–34.
 
 /* Reimbursable expense categories. The form's dropdown is built from this list, and
    submit rejects anything not on it — otherwise the categories drift and the whole
@@ -137,6 +143,7 @@ function doPost(e){
       case 'list'       : return listInvoices(body);    // token required
       case 'act'        : return actOnInvoice(body);    // token required
       case 'archiveSweep': return archiveSweep(body);   // token required (INV-020 bulk archive)
+      case 'editInvoice': return editInvoice(body);     // token required (INV-022 internal adjustments)
       default           : return json({ ok:false, error:'Unknown action' });
     }
   }catch(err){
@@ -435,6 +442,145 @@ function actOnInvoice(b){
   return json({ ok:true, invoice: rowToObj_(row) });    // client updates in place; no refetch
 }
 
+/***** EDIT (token) — INV-022 internal adjustments *****/
+/* A verbally-agreed price change, applied internally so the contractor doesn't resubmit.
+ *
+ * Rules (grilled with Dash, 2026-08-24):
+ *   - APPROVERS ONLY — same coverage as review (canReview_). Controllers pay; they do
+ *     not reprice. Editing is a bigger power than approving, so the payer never holds it.
+ *   - Any edit sends the bill BACK TO REVIEW ('pending') so a fresh approval covers the
+ *     new amount. A paid ('billed') bill cannot be edited — reopen it first (owner only).
+ *   - The submission is immutable: LineItemsJSON / LaborAmount are never rewritten. The
+ *     adjusted state lives in AdjLineItemsJSON / AdjLaborAmount, every change appends to
+ *     the AdjLogJSON audit trail, and 'Amount' becomes the current billed total.
+ *   - The contractor is notified by email with the adjusted lines and the new total —
+ *     that notification is the paper trail for the verbal agreement.
+ *   - Hours bills take a full replacement set of lines (server recomputes every total);
+ *     file bills (uploaded PDF) take an amount override. Both REQUIRE a reason.
+ *
+ * Same one-read/one-write row discipline as actOnInvoice. */
+function editInvoice(b){
+  var s = session(b.token);
+  if (!s) return json({ ok:false, error:'Not signed in.' });
+  var id = b.id, reason = String(b.reason||'').trim();
+  if (!id) return json({ ok:false, error:'Missing id.' });
+  if (!reason) return json({ ok:false, error:'An edit needs a reason — what was agreed, and with whom.' });
+
+  var found = findInvoice_(id);
+  if (!found) return json({ ok:false, error:'Invoice not found.' });
+  var range = found.sh.getRange(found.rowIdx, 1, 1, HEADERS.length);
+  var row = range.getValues()[0];                      // <-- the ONLY read
+  var billingType = row[COL['BillingType']] || 'production';
+  var status = String(row[COL['Status']]||'');
+
+  if (!canReview_(s, billingType)){
+    return json({ ok:false, error: s.role === 'controller'
+      ? 'Controllers mark invoices paid; they do not edit them.'
+      : 'That billing type is outside your queue.' });
+  }
+  if (status === 'billed'){
+    return json({ ok:false, error:'This bill is already paid. Reopen it (owner only) before editing.' });
+  }
+  if (String(row[COL['Archived']]||'').toLowerCase() === 'yes'){
+    return json({ ok:false, error:'This bill is archived — unarchive it before editing.' });
+  }
+
+  var entryType = row[COL['EntryType']] || 'hours';
+  var expensesTotal = Number(row[COL['ExpensesTotal']]) || 0;
+  var hasAdj = row[COL['AdjLaborAmount']] !== '' && row[COL['AdjLaborAmount']] != null;
+  var prevLabor = hasAdj ? (Number(row[COL['AdjLaborAmount']])||0)
+                         : (row[COL['LaborAmount']]===''||row[COL['LaborAmount']]==null
+                             ? (Number(row[COL['Amount']])||0) : (Number(row[COL['LaborAmount']])||0));
+  var prevAmount = Number(row[COL['Amount']])||0;
+
+  var newLabor, adjLinesJson = String(row[COL['AdjLineItemsJSON']]||'');
+  if (entryType === 'hours'){
+    if (!Array.isArray(b.lines) || !b.lines.length){
+      return json({ ok:false, error:'Send the full set of adjusted lines.' });
+    }
+    var lines = [], t = 0;
+    for (var i=0;i<b.lines.length;i++){
+      var l = b.lines[i]||{};
+      var h = Number(l.hours)||0, ot = Number(l.otHours)||0, r = Number(l.rate)||0;
+      if (h<0 || ot<0 || r<0) return json({ ok:false, error:'Hours and rates cannot be negative.' });
+      var total = h*r + ot*r*1.5;   // same arithmetic as the forms; never trust the client's total
+      lines.push({ date:String(l.date||''), desc:String(l.desc||''), hours:h, otHours:ot, rate:r, total:total });
+      t += total;
+    }
+    if (!(t>0)) return json({ ok:false, error:'The adjusted lines total zero — reject the bill instead.' });
+    newLabor = t;
+    adjLinesJson = JSON.stringify(lines);
+  } else {
+    newLabor = Number(b.amountOverride);
+    if (!isFinite(newLabor) || newLabor <= 0){
+      return json({ ok:false, error:'Enter the agreed invoice total.' });
+    }
+  }
+
+  var newAmount = newLabor + expensesTotal;
+  var log = safeParse_(String(row[COL['AdjLogJSON']]||'')) || [];
+  log.push({ by:s.name, email:s.email, at:new Date().toISOString(), reason:reason,
+             prevLabor:prevLabor, newLabor:newLabor, prevAmount:prevAmount, newAmount:newAmount });
+
+  row[COL['AdjLineItemsJSON']] = adjLinesJson;
+  row[COL['AdjLaborAmount']]   = newLabor;
+  row[COL['AdjLogJSON']]       = JSON.stringify(log);
+  row[COL['Amount']]           = newAmount;    // current billed total; the submission columns stand
+  row[COL['Status']]           = 'pending';    // back through review — a fresh approval covers the new figure
+  range.setValues([row]);                      // <-- the ONLY write
+
+  notifyAdjustment_(row, reason, prevAmount, newAmount, s.name);
+  return json({ ok:true, invoice: rowToObj_(row) });
+}
+
+/* The contractor's copy of the change — this email IS the paper trail for the verbal
+ * agreement, so it carries the reason, the old and new totals, and the adjusted lines.
+ * Fire-and-forget: mail must never block or unwind the edit (the Sheet is the record).
+ * NOTE: MailApp is a NEW OAuth scope for this script — the redeploy will re-prompt for
+ * authorization once. Sends as the deploying account (dash@), so replies land there. */
+function notifyAdjustment_(row, reason, prevAmount, newAmount, editorName){
+  try{
+    var email = String(row[COL['Email']]||'').trim();
+    if (!email) return;
+    var id = row[COL['InvoiceID']], job = String(row[COL['Job']]||'');
+    var body = [
+      'Hi ' + (String(row[COL['Contractor']]||'').split(' ')[0] || 'there') + ',',
+      '',
+      'Your invoice ' + id + (job ? ' (' + job + ')' : '') + ' was updated by our team, per what was discussed:',
+      '',
+      '  "' + reason + '" — ' + editorName,
+      '',
+      '  Previous total: ' + fmtMoney_(prevAmount),
+      '  New total:      ' + fmtMoney_(newAmount),
+    ];
+    var lines = safeParse_(String(row[COL['AdjLineItemsJSON']]||''));
+    if (lines && lines.length){
+      body.push('', 'Updated line items:');
+      lines.forEach(function(l){
+        body.push('  ' + (l.date||'—') + '  ' + (l.desc||'—') + ' — ' + (Number(l.hours)||0) + ' hrs' +
+                  (Number(l.otHours)>0 ? ' + ' + l.otHours + ' OT' : '') +
+                  ' @ ' + fmtMoney_(Number(l.rate)||0) + '/hr = ' + fmtMoney_(Number(l.total)||0));
+      });
+    }
+    body.push('',
+      'Your original submission stays on file unchanged. The updated invoice goes back',
+      'through our normal review before payment. If this does not match what was agreed,',
+      'reply to this email and we will straighten it out.',
+      '',
+      '— Limitless Lights & Sound');
+    MailApp.sendEmail({
+      to: email,
+      subject: 'Updated: invoice ' + id + ' — new total ' + fmtMoney_(newAmount),
+      body: body.join('\n')
+    });
+  }catch(e){ /* never let mail failure undo an edit that is already in the Sheet */ }
+}
+
+function fmtMoney_(n){
+  n = Number(n)||0;
+  return '$' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 /***** ARCHIVE SWEEP (token) — INV-020 *****/
 /* The 3–6-month filing ritual: mark every Paid/Rejected bill older than `months` archived in
  * one pass. Same read/write discipline as act, per tab: one getValues, one setValues (only
@@ -549,13 +695,15 @@ function ensureSheets_(){
  * every single submission. It now runs once at creation; use restyle() to
  * re-apply it on demand. */
 /* The Approved tab is a live QUERY stacking both data tabs. The source range must
-   span ALL of HEADERS — A..AD is 30 columns. If HEADERS grows again, widen this to
-   match, or the trailing columns are silently dropped from the stack. The projected
-   Col numbers are positional: Col2=InvoiceID, Col3=Status, Col27=BillRef. */
+   span ALL of HEADERS — A..AH is 34 columns (INV-022 added the Adj* trio). If HEADERS
+   grows again, widen this to match, or the trailing columns are silently dropped from
+   the stack. The projected Col numbers are positional: Col2=InvoiceID, Col3=Status,
+   Col27=BillRef. Col12 (Amount) is the CURRENT billed total — an INV-022 edit updates
+   it, so this tab needs no adjustment awareness of its own. */
 function approvedFormula_(){
   /* Col31 is Archived (INV-020). Blank cells are NULL to QUERY — a bare `Col31 <> 'yes'`
      would fail for them and empty the whole tab, hence the explicit `is null` half. */
-  return "=IFERROR(QUERY({'"+PRODUCTIONS_TAB+"'!A2:AE;'"+INSTALLS_TAB+"'!A2:AE}, " +
+  return "=IFERROR(QUERY({'"+PRODUCTIONS_TAB+"'!A2:AH;'"+INSTALLS_TAB+"'!A2:AH}, " +
          "\"select Col2,Col4,Col5,Col9,Col10,Col12,Col17,Col3,Col27 " +
          "where (Col3='approved' or Col3='billed') and (Col31 is null or Col31 <> 'yes') order by Col1 desc\", 0), )";
 }
@@ -662,7 +810,8 @@ function setColWidths_(sh){
     'ReviewedBy':115,'ReviewedAt':150,'ReviewNote':200,'EscalatedBy':115,'EscalatedAt':150,'EscalationNote':200,
     'BilledBy':110,'BilledAt':150,'BillRef':130,
     'LaborAmount':110,'ExpensesTotal':115,'ExpensesJSON':260,
-    'Archived':90
+    'Archived':90,
+    'AdjLineItemsJSON':240,'AdjLaborAmount':120,'AdjLogJSON':260
   };
   HEADERS.forEach(function(h){ if (w[h]) sh.setColumnWidth(COL[h]+1, w[h]); });
 }
@@ -693,7 +842,13 @@ function rowToObj_(r){
     stage2:{ by:o['EscalatedBy'], at: o['EscalatedAt']?new Date(o['EscalatedAt']).toISOString():'', note:o['EscalationNote'] },
     billed:{ by:o['BilledBy'], at: o['BilledAt']?new Date(o['BilledAt']).toISOString():'', ref:o['BillRef'] },
     /* INV-020: rows predating the Archived column read blank -> false (live). */
-    archived: String(o['Archived']||'').toLowerCase() === 'yes'
+    archived: String(o['Archived']||'').toLowerCase() === 'yes',
+    /* INV-022: the adjustment layer. Blank on never-edited rows -> null/empty, and the
+       console falls back to the submitted lines. amount above is ALREADY the adjusted
+       grand total when an edit exists — these expose the trail and the current lines. */
+    adjLineItems: o['AdjLineItemsJSON'] ? safeParse_(o['AdjLineItemsJSON']) : null,
+    adjLaborAmount: o['AdjLaborAmount']===''||o['AdjLaborAmount']==null ? null : (Number(o['AdjLaborAmount'])||0),
+    adjLog: o['AdjLogJSON'] ? (safeParse_(o['AdjLogJSON'])||[]) : []
   };
 }
 function safeParse_(s){ try{return JSON.parse(s);}catch(e){return null;} }

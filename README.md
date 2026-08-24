@@ -153,6 +153,25 @@ So the flow is: **contractor form → Apps Script → Sheet + Drive → CRM invo
 
 ---
 
+## Internal adjustments (INV-022)
+
+A verbally-agreed price change can be applied **from the CRM's invoice detail** ("Edit
+amounts") instead of making the contractor resubmit. The rules, decided 2026-08-24:
+
+- **Approvers only** — the same people who could approve the bill (`canReview_` coverage).
+  Controllers pay; they do not reprice.
+- The contractor's **submission is immutable**: `LineItemsJSON` / `LaborAmount` are never
+  rewritten. Adjusted lines/labor live in `AdjLineItemsJSON` / `AdjLaborAmount`, every edit
+  appends who/when/why + old→new to `AdjLogJSON`, and `Amount` becomes the current billed
+  total so the Approved tab keeps paying one figure.
+- Any edit sets the bill back to **Awaiting review**; a **paid** bill can't be edited
+  (reopen first, owner-only).
+- The **contractor is emailed** the adjusted lines and new total (`notifyAdjustment_`) —
+  that email is the paper trail for the verbal agreement. **MailApp is a new OAuth scope:
+  the next redeploy will ask for authorization once.**
+- Hours bills take a replacement line set (totals recomputed server-side); uploaded-PDF
+  bills take an amount override. A reason is always required.
+
 ## Who can review what
 
 One review step. An invoice sits at **"Awaiting review"** and is never addressed to a named person — there is no stage-1/stage-2 chain. Escalating asks for a **cross review** (a second opinion); it does not advance the invoice to a second gate, so an escalated invoice is still awaiting review.
