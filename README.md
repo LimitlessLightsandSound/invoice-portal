@@ -13,7 +13,7 @@ Public forms where contractors submit labor invoices and install billing. Submis
 | File | What it is | Goes where |
 |---|---|---|
 | `index.html` | **Production invoice form** (event/labor). Branded, public. | GitHub Pages |
-| `install.html` | **Install billing form** — same fields, routed to the Installs tab. | GitHub Pages (same repo) |
+| `install.html` | **Install billing form** — same fields minus overtime (no OT on install lines, straight hours × rate), routed to the Installs tab. | GitHub Pages (same repo) |
 | `Code.gs` | Backend: saves submissions to the Sheet, files to Drive, styles the sheet. | Google Apps Script |
 | `README.md` | This file. | — |
 
