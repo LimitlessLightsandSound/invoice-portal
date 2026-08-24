@@ -11,27 +11,30 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
   :root{
-    --navy:#0D3A6E;--navy-d:#0a2c54;--navy-l:#1b4f8f;--bg:#f7f6f2;--card:#fff;
+    /* Installs wears the GREEN ramp so contractors can tell the two forms apart at a
+       glance (production stays navy). The --navy names are kept so the rest of the
+       stylesheet stays line-for-line comparable with index.html. */
+    --navy:#155e40;--navy-d:#0e4a31;--navy-l:#1e7e56;--bg:#f7f6f2;--card:#fff;
     --ink:#1c2530;--muted:#6b7785;--line:#e4e2db;--line-2:#d4d1c8;
     --blue:#2f6fb3;--green:#2e9e6b;--amber:#e0a32e;--red:#d6543e;
     --blue-bg:#e9f1fa;--green-bg:#e6f5ed;--amber-bg:#fdf3df;--red-bg:#fbe9e5;
-    --shadow:0 1px 2px rgba(13,58,110,.04),0 8px 24px rgba(13,58,110,.06);
-    --shadow-lg:0 4px 12px rgba(13,58,110,.08),0 20px 48px rgba(13,58,110,.12);--radius:14px;
+    --shadow:0 1px 2px rgba(21,94,64,.04),0 8px 24px rgba(21,94,64,.06);
+    --shadow-lg:0 4px 12px rgba(21,94,64,.08),0 20px 48px rgba(21,94,64,.12);--radius:14px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased}
   body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
-    background:radial-gradient(1200px 600px at 85% -10%,rgba(47,111,179,.06),transparent 60%),
+    background:radial-gradient(1200px 600px at 85% -10%,rgba(46,158,107,.07),transparent 60%),
                radial-gradient(900px 500px at -10% 110%,rgba(46,158,107,.05),transparent 60%)}
   .wrap{position:relative;z-index:1;max-width:820px;margin:0 auto;padding:0 22px 80px}
-  header{background:linear-gradient(135deg,var(--navy),var(--navy-d));color:#fff;margin-bottom:30px;box-shadow:0 12px 40px rgba(13,58,110,.22)}
+  header{background:linear-gradient(135deg,var(--navy),var(--navy-d));color:#fff;margin-bottom:30px;box-shadow:0 12px 40px rgba(21,94,64,.22)}
   .hd-inner{max-width:820px;margin:0 auto;padding:30px 22px 26px;display:flex;align-items:center;gap:14px}
   /* The real mark (public/brand in the CRM). White-on-transparent PNG, so it only
      works on the dark header — don't reuse it on a light surface without recolouring. */
   .brand-logo{height:32px;width:auto;flex-shrink:0;display:block}
   @media(max-width:520px){.brand-logo{height:26px}}
-  header h1{font-family:'Playfair Display',serif;font-weight:800;font-size:25px;letter-spacing:.2px;line-height:1.1}
-  header p{font-size:12.5px;color:rgba(255,255,255,.62);font-weight:500;margin-top:2px}
+  header h1{font-family:'Playfair Display',serif;font-weight:800;font-size:34px;letter-spacing:.2px;line-height:1.1}
+  header p{font-size:14px;color:rgba(255,255,255,.62);font-weight:500;margin-top:2px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:30px 30px 26px;margin-bottom:22px}
   .sec-head{font-family:'Playfair Display',serif;font-weight:700;font-size:19px;color:var(--navy);display:flex;align-items:center;gap:11px;margin-bottom:4px}
   .sec-num{width:26px;height:26px;border-radius:7px;background:var(--navy);color:#fff;font-family:'Inter';font-weight:700;font-size:13px;display:grid;place-items:center;flex-shrink:0}
@@ -139,7 +142,7 @@
 <header>
   <div class="hd-inner">
     <img class="brand-logo" src="brand/lockup-h.png" alt="Limitless Lights + Sound">
-    <div><h1>Submit Install Billing</h1><p>Install Billing</p></div>
+    <div><h1>Installs</h1><p>Submit install billing</p></div>
   </div>
 </header>
 
