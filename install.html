@@ -35,6 +35,9 @@
   @media(max-width:520px){.brand-logo{height:26px}}
   header h1{font-family:'Playfair Display',serif;font-weight:800;font-size:34px;letter-spacing:.2px;line-height:1.1}
   header p{font-size:14px;color:rgba(255,255,255,.62);font-weight:500;margin-top:2px}
+  .swap-link{margin-left:auto;flex-shrink:0;color:#fff;text-decoration:none;font-size:12.5px;font-weight:600;border:1.5px solid rgba(255,255,255,.35);border-radius:999px;padding:8px 14px;white-space:nowrap;transition:.15s}
+  .swap-link:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.6)}
+  @media(max-width:520px){.hd-inner{flex-wrap:wrap}.swap-link{margin-left:0}}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:30px 30px 26px;margin-bottom:22px}
   .sec-head{font-family:'Playfair Display',serif;font-weight:700;font-size:19px;color:var(--navy);display:flex;align-items:center;gap:11px;margin-bottom:4px}
   .sec-num{width:26px;height:26px;border-radius:7px;background:var(--navy);color:#fff;font-family:'Inter';font-weight:700;font-size:13px;display:grid;place-items:center;flex-shrink:0}
@@ -143,6 +146,7 @@
   <div class="hd-inner">
     <img class="brand-logo" src="brand/lockup-h.png" alt="Limitless Lights + Sound">
     <div><h1>Installs</h1><p>Submit install billing</p></div>
+    <a class="swap-link" href="./">Production gig? Switch form →</a>
   </div>
 </header>
 
