@@ -94,7 +94,7 @@ Size cap is **10 MB per file** (`MAX_FILE_MB` in `Code.gs`, also checked client-
 ## Part 1 — Backend (Google Sheet + Apps Script)
 
 1. Open the sheet **Limitless — Contractor Invoices** (owned by dash@). **Extensions → Apps Script.**
-2. Select all, delete, paste in all of `Code.gs`. Confirm the 5 emails in `REVIEWERS` near the top.
+2. Select all, delete, paste in all of `Code.gs`. Confirm the emails in `REVIEWERS` near the top.
 3. Function dropdown → **`setup`** → **Run**. Authorize when prompted (*Advanced → Go to project → Allow*).
 4. **Deploy → New deployment → Web app:**
    - Execute as: **Me** (sign in as dash@ so uploaded files live under your account)
@@ -162,6 +162,7 @@ One review step. An invoice sits at **"Awaiting review"** and is never addressed
 | Dash (owner) | ✅ | ✅ | ✅ |
 | Tony (approver, no scope) | ✅ | ✅ | — |
 | Gabe (approver, `scope: 'install'`) | — | ✅ | — |
+| Installs — installs@ (approver, `scope: 'install'`) | — | ✅ | — |
 | Taryn / Accounting (controller) | — | — | ✅ |
 
 Controllers deliberately can't approve — the person who pays isn't the person who approves. Reopening a **billed** invoice is owner-only, since it unwinds a payment record; anything else a reviewer can put back in the queue.

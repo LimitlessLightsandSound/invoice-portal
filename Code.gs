@@ -6,7 +6,7 @@
  * SETUP:
  *   1. Open the Sheet "Limitless — Contractor Invoices". Extensions > Apps Script.
  *      Delete the sample, paste this whole file.
- *   2. Confirm the REVIEWERS map below (5 people).
+ *   2. Confirm the REVIEWERS map below (6 entries).
  *   3. Run setup() once (authorize when prompted). It builds + styles the tabs.
  *   4. Deploy > New deployment > Web app:
  *        Execute as: Me
@@ -40,8 +40,8 @@
  *
  *   owner      — Dash. Reviews either type, and can also mark paid and reopen.
  *   approver   — reviews. `scope` limits which billing type:
- *                  Tony  : no scope  -> BOTH production and install
- *                  Gabe  : 'install' -> install billing only
+ *                  Tony             : no scope  -> BOTH production and install
+ *                  Gabe / Installs  : 'install' -> install billing only
  *   controller — Taryn / Accounting. Marks approved invoices paid, never reviews.
  *
  * `pay: true` grants marking-paid on top of a role. Tony has it (Dash's call), so he
@@ -51,6 +51,7 @@ const REVIEWERS = {
   'dash@limitlesslightsandsound.com'       : { role: 'owner',      name: 'Dash' },
   'tony@limitlesslightsandsound.com'       : { role: 'approver',   name: 'Tony',       pay: true },
   'gabe@limitlesslightsandsound.com'       : { role: 'approver',   name: 'Gabe',       scope: 'install' },
+  'installs@limitlesslightsandsound.com'   : { role: 'approver',   name: 'Installs',   scope: 'install' },
   'taryn@limitlesslightsandsound.com'      : { role: 'controller', name: 'Taryn' },
   'accounting@limitlesslightsandsound.com' : { role: 'controller', name: 'Accounting' }
 };
