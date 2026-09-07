@@ -39,9 +39,11 @@
  * review. Escalating is a request for a second opinion, not a handoff up a ladder.
  *
  *   owner      — Dash. Reviews either type, and can also mark paid and reopen.
- *   approver   — reviews. `scope` limits which billing type:
- *                  Tony             : no scope  -> BOTH production and install
- *                  Gabe / Installs  : 'install' -> install billing only
+ *   approver   — reviews. `scope` limits which billing type they may ACT on — as of INV-023 it
+ *                no longer limits what they SEE (every reviewer's list carries both tabs; the
+ *                CRM console opens on their own type and lets them look at the other):
+ *                  Tony             : no scope  -> reviews BOTH production and install
+ *                  Gabe / Installs  : 'install' -> reviews install only, sees production too
  *   controller — Taryn / Accounting. Marks approved invoices paid, never reviews.
  *
  * `pay: true` grants marking-paid on top of a role. Tony has it (Dash's call), so he
@@ -62,9 +64,23 @@ function canPay_(s){
   return !!s && (s.role === 'owner' || s.role === 'controller' || !!s.pay);
 }
 
-/* Can this session archive/unarchive a bill (INV-020)? Filing is ledger work, not review,
- * so it belongs to the people who own the ledger: the owner and the controllers. */
-function canArchive_(s){
+/* Can this session archive/unarchive THIS bill (INV-020, widened by INV-023)? Filing was
+ * ledger-owner-only, which left the approvers — the people who actually work the queue — staring
+ * at decided bills they could not clear. They can now file the bills they COVER: the owner and
+ * the controllers see the whole ledger, an approver only what canReview_ lets them review. That
+ * coverage check is load-bearing as of INV-023: a scoped approver now SEES the other billing
+ * type (listInvoices below) read-only, and must not be able to file what they cannot review. */
+function canArchive_(s, billingType){
+  if (!s) return false;
+  if (s.role === 'owner' || s.role === 'controller') return true;
+  return canReview_(s, billingType);
+}
+
+/* Who may run the BULK age sweep (INV-023). Deliberately narrower than canArchive_ and unchanged
+ * from INV-020: the sweep walks both tabs by age with no per-bill review, so a scoped approver
+ * would file bills they never saw. Approvers file the bills they picked, one selection at a
+ * time — Dash's call, 2026-09-07: "archive should be for only selected items". */
+function canSweep_(s){
   return !!s && (s.role === 'owner' || s.role === 'controller');
 }
 
@@ -324,17 +340,17 @@ function listInvoices(b){
   if (!s) return json({ ok:false, error:'Not signed in.' });
   ensureSheets_();
 
-  /* Scope mirrors canReview_: a controller sees only the billable pipeline, a SCOPED
-     approver (Gabe) sees just their type, and everyone else — the owner and an
-     unscoped approver like Tony — sees both. Checking `s.scope` for truth rather
-     than comparing it to 'install' matters: Tony has no scope, and the old
-     comparison quietly fell through to Productions-only for him. */
+  /* INV-023 — every REVIEWER now gets both tabs; only a controller's list stays narrowed, to
+     the billable pipeline they actually pay out of. A scoped approver (Gabe) used to receive
+     install rows ONLY, which meant the console could not offer them a billing-type filter at
+     all and they had no way to see the wider ledger. They now see both and land on their own
+     type, with review still gated per bill by canReview_ — visibility widened, authority did
+     not. Everything they cannot review reads as a decided/other-type row they can file but not
+     approve (canArchive_ / availableActions mirror this in the CRM). */
   var rows;
   if (s.role === 'controller'){
     rows = readData_(PRODUCTIONS_TAB).concat(readData_(INSTALLS_TAB))
              .filter(function(x){ return x.status==='approved' || x.status==='billed'; });
-  } else if (s.role === 'approver' && s.scope){
-    rows = readData_(s.scope === 'install' ? INSTALLS_TAB : PRODUCTIONS_TAB);
   } else {
     rows = readData_(PRODUCTIONS_TAB).concat(readData_(INSTALLS_TAB));
   }
@@ -415,20 +431,20 @@ function actOnInvoice(b){
     }
   } else if (act === 'archive'){
     /* INV-020 — filing, not review: only a TERMINAL bill (paid/rejected) leaves the working
-       set, and only the ledger owners file it. Status is untouched — Archived is its own
-       column, so the audit trail keeps saying what happened to the bill. */
-    if (canArchive_(s) && (status === 'billed' || status === 'rejected')){
+       set, and (INV-023) only someone who covers its billing type files it. Status is untouched
+       — Archived is its own column, so the audit trail keeps saying what happened to the bill. */
+    if (canArchive_(s, billingType) && (status === 'billed' || status === 'rejected')){
       row[COL['Archived']] = 'yes'; allowed = true;
     }
   } else if (act === 'unarchive'){
-    if (canArchive_(s) && String(row[COL['Archived']]||'').toLowerCase() === 'yes'){
+    if (canArchive_(s, billingType) && String(row[COL['Archived']]||'').toLowerCase() === 'yes'){
       row[COL['Archived']] = ''; allowed = true;
     }
   }
 
   if (!allowed){
-    if ((act === 'archive' || act === 'unarchive') && !canArchive_(s)){
-      return json({ ok:false, error:'Only the owner or accounting can archive bills.' });
+    if ((act === 'archive' || act === 'unarchive') && !canArchive_(s, billingType)){
+      return json({ ok:false, error:'That billing type is outside your queue, so you cannot file it.' });
     }
     if (!reviewer && act !== 'billed' && act !== 'archive' && act !== 'unarchive'){
       return json({ ok:false, error: s.role === 'controller'
@@ -590,7 +606,7 @@ function fmtMoney_(n){
 function archiveSweep(b){
   var s = session(b.token);
   if (!s) return json({ ok:false, error:'Not signed in.' });
-  if (!canArchive_(s)) return json({ ok:false, error:'Only the owner or accounting can archive bills.' });
+  if (!canSweep_(s)) return json({ ok:false, error:'Only the owner or accounting can run the bulk archive sweep.' });
   var months = Number(b.months);
   if (!isFinite(months) || months < 0) months = 3;
   var cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months);
