@@ -70,7 +70,28 @@ Totals are recomputed server-side; the client's arithmetic is never trusted. The
 
 Rows created before this change have blank expense columns and read back as labor-only, so old invoices are unaffected.
 
-**Adding a column later:** append to the END of `HEADERS` only. `COL` is index-based and the Approved tab's QUERY refers to columns positionally (`Col2`, `Col27`), so inserting in the middle silently rewires both. Then widen the range in `approvedFormula_()` (currently `A2:AD` = 30 columns) and run `setup()`, which rewrites the header row and refreshes the formula.
+**Adding a column later:** append to the END of `HEADERS` only. `COL` is index-based and the Approved tab's QUERY refers to columns positionally (`Col2`, `Col27`), so inserting in the middle silently rewires both. Then widen the range in `approvedFormula_()` (currently `A2:AH` = 34 columns) **if the Approved tab needs to read the new column** — `DocsJSON` (col 35 / `AI`, INV-026) deliberately sits outside it, since payment paperwork is not something the payment queue selects on — and run `setup()`, which rewrites the header row and refreshes the formula.
+
+---
+
+## Supporting documents (INV-026)
+
+Both forms have a **Supporting documents** picker in section 3: multiple files at once, for a W9, payment/ACH details, or anything else the contractor should have on file. It exists so those stop being a separate email thread.
+
+These are **not receipts** and are handled apart from them at every step:
+
+| | Receipts | Supporting documents |
+|---|---|---|
+| Belongs to | one expense row | the invoice |
+| Drive folder | `Limitless — Contractor Invoices` | `Limitless — Contractor Documents` |
+| Sheet column | `ReceiptURLs` (+ `ExpensesJSON`) | `DocsJSON` — `[{name,url}]` |
+| Affects the total | yes (reimbursable) | no |
+
+The separate folder is why `uploadFile` takes `kind:'doc'`: the routing decision happens at upload time, not at submit, so a W9 never sits in the receipts folder even briefly. `adoptFile_`'s "is it really in our folder" guard is folder-aware for the same reason.
+
+**The contractor's original filename is kept in `DocsJSON`.** Drive renames the stored copy to the invoice id (`INV-…_doc1.pdf`), so without the name a reviewer sees identical chips and has to open each one.
+
+**Sharing: the same reviewers can open both folders** (Dash, 2026-09-08). The split is structural — it means that decision can change later without moving files. `setup()` shares both, and creating the documents folder is a side effect of the first run after this ships.
 
 ---
 

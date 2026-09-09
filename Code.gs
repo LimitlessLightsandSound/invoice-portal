@@ -94,6 +94,13 @@ function canReview_(s, billingType){
 }
 
 const DRIVE_FOLDER_NAME = 'Limitless — Contractor Invoices';
+/* INV-026 — supporting documents (W9, payment/ACH details) get their OWN folder.
+   A W9 carries a full SSN or EIN and payment info carries bank account numbers;
+   filing those beside parking receipts means one sharing decision covers both, and
+   the two are not the same kind of thing. Dash, 2026-09-08: the same reviewers may
+   open it — the split is about being able to change that later without moving
+   files, not about withholding access today. */
+const DRIVE_DOCS_FOLDER_NAME = 'Limitless — Contractor Documents';
 const SESSION_TTL_DAYS  = 30;     // how long a login lasts
 const MAX_FILE_MB       = 10;     // per uploaded file
 
@@ -133,7 +140,15 @@ const HEADERS = ['Timestamp','InvoiceID','Status','BillingType','Contractor','Co
      adjusted lines/labor here, appends to the AdjLog audit trail (who/when/why, old → new),
      and updates 'Amount' to the CURRENT billed total (adjusted labor + expenses) so the
      Approved tab and the console keep paying one figure. Blank = never adjusted. */
-  'AdjLineItemsJSON','AdjLaborAmount','AdjLogJSON'];   // Cols AF–AH / Col32–34.
+  'AdjLineItemsJSON','AdjLaborAmount','AdjLogJSON',   // Cols AF–AH / Col32–34.
+  /* INV-026 — supporting documents (W9, payment details, anything else the contractor wants
+     on file), as [{name,url}]. The contractor's ORIGINAL filename is kept because the Drive
+     copy is renamed to the invoice id, and "W9 2026.pdf" is the only thing that tells a
+     reviewer what a chip is. Lives in its OWN Drive folder — see DRIVE_DOCS_FOLDER_NAME.
+     Appended at the very end, per the rule above: putting it beside 'Archived' where it
+     reads better would have shifted the three INV-022 columns and silently rewired every
+     adjusted row. Blank on every row submitted before this shipped. Col AI / Col35. */
+  'DocsJSON'];
 
 /* Reimbursable expense categories. The form's dropdown is built from this list, and
    submit rejects anything not on it — otherwise the categories drift and the whole
@@ -227,13 +242,19 @@ function session(token){
 function uploadFile(b){
   var f = b.file;
   if (!f || !f.b64) return json({ ok:false, error:'No file received.' });
+  /* INV-026 — `kind:'doc'` routes the upload to the documents folder instead of the
+     invoice-attachment one. Decided HERE rather than at submit because moving a file
+     between folders later is a second Drive round trip on the path the contractor
+     waits on, and because a W9 should never have sat in the receipts folder at all. */
+  var isDoc = String(b.kind||'') === 'doc';
   try{
-    var file = writeFile_(getFolder_(), f, 'PENDING-' + Utilities.getUuid().slice(0,8));
+    var file = writeFile_(isDoc ? getDocsFolder_() : getFolder_(), f, 'PENDING-' + Utilities.getUuid().slice(0,8));
     var id = file.getId();
     /* Remember that WE minted this id. submit then trusts this record instead of
        re-fetching the file from Drive to verify it — that verification cost ~1.3s
-       per attachment on the button press the contractor actually waits on. */
-    try { CacheService.getScriptCache().put('pend_'+id, '1', 21600); } catch(e){}
+       per attachment on the button press the contractor actually waits on. The value
+       records WHICH folder it went to, so the slow path verifies against the right one. */
+    try { CacheService.getScriptCache().put('pend_'+id, isDoc ? 'doc' : '1', 21600); } catch(e){}
     /* Uploads happen in the background while the contractor is still filling in the
        form, so this is the one path that can absorb spare work. Drain a few queued
        renames here rather than on submit. */
@@ -295,6 +316,20 @@ function submitInvoice(b){
     var u = claimFile_(e.fileId, id+'_receipt'+(receiptUrls.length+1));
     if (u){ e.url = u; receiptUrls.push(u); }
   });
+  /* INV-026 — supporting documents (W9, payment details). Claimed out of the DOCUMENTS
+     folder, and kept with the contractor's original filename: the Drive copy is renamed
+     to the invoice id, so without the name a reviewer sees three identical chips and has
+     to open each one. Never merged into ReceiptURLs — these are not evidence for a
+     charge, and the console lists them separately. */
+  var docs = [];
+  if (Array.isArray(b.docs)){
+    b.docs.forEach(function(d){
+      if (!d || !d.fileId) return;
+      var u = claimFile_(d.fileId, id+'_doc'+(docs.length+1), 'doc');
+      if (u) docs.push({ name:String(d.name||('Document '+(docs.length+1))), url:u });
+    });
+  }
+
   if (Array.isArray(b.receiptFileIds)){          // legacy clients: bare receipts, no categories
     b.receiptFileIds.forEach(function(fid){
       var u = claimFile_(fid, id+'_receipt'+(receiptUrls.length+1));
@@ -329,6 +364,7 @@ function submitInvoice(b){
   row[COL['LaborAmount']]   = laborAmount;
   row[COL['ExpensesTotal']] = expensesTotal;
   row[COL['ExpensesJSON']]  = expenses.length ? JSON.stringify(expenses) : '';
+  row[COL['DocsJSON']]      = docs.length ? JSON.stringify(docs) : '';
 
   sheet_(tabForType_(billingType)).appendRow(row);
   return json({ ok:true, id:id });
@@ -827,7 +863,7 @@ function setColWidths_(sh){
     'BilledBy':110,'BilledAt':150,'BillRef':130,
     'LaborAmount':110,'ExpensesTotal':115,'ExpensesJSON':260,
     'Archived':90,
-    'AdjLineItemsJSON':240,'AdjLaborAmount':120,'AdjLogJSON':260
+    'AdjLineItemsJSON':240,'AdjLaborAmount':120,'AdjLogJSON':260,'DocsJSON':260
   };
   HEADERS.forEach(function(h){ if (w[h]) sh.setColumnWidth(COL[h]+1, w[h]); });
 }
@@ -849,6 +885,8 @@ function rowToObj_(r){
     laborAmount: o['LaborAmount']===''||o['LaborAmount']==null ? (Number(o['Amount'])||0) : (Number(o['LaborAmount'])||0),
     expensesTotal: Number(o['ExpensesTotal'])||0,
     expenses: o['ExpensesJSON'] ? (safeParse_(o['ExpensesJSON'])||[]) : [],
+    /* INV-026 — supporting documents, [] on every row predating the column. */
+    docs: o['DocsJSON'] ? (safeParse_(o['DocsJSON'])||[]) : [],
     /* One review stamp, not a stage-1/stage-2 chain: whoever approved or rejected it.
        `escalated` records who asked for a cross review, if anyone did. stage1/stage2 are
        kept as aliases so an older cached CRM bundle doesn't render blanks mid-rollout. */
@@ -897,13 +935,38 @@ function getFolder_(){
   return folder;
 }
 
-/* Share the folder with the reviewers so they can open attachments (no public
- * links). Idempotent: only adds someone who isn't already on the folder, so
- * re-running setup() doesn't re-notify everyone. Run setup() again after editing
- * REVIEWERS — that is the ONLY place sharing should happen. */
-function shareFolder_(){
-  var folder = getFolder_();
+/* INV-026 — the supporting-documents folder (W9, payment details). Same resolution
+ * and caching as getFolder_ above, its own ScriptProperties key. Separate because a
+ * W9 carries an SSN/EIN and payment info carries bank details: keeping them in their
+ * own folder means the sharing decision can change later without moving files.
+ * Dash, 2026-09-08: the same reviewers may open it, so setup() shares both the same
+ * way — the split is structural, not a restriction. */
+var DOCS_FOLDER_CACHE = null;
+function getDocsFolder_(){
+  if (DOCS_FOLDER_CACHE) return DOCS_FOLDER_CACHE;
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('docsFolderId');
+  if (id){
+    try { DOCS_FOLDER_CACHE = DriveApp.getFolderById(id); return DOCS_FOLDER_CACHE; }
+    catch(e){ /* deleted or stale id — fall through and re-resolve */ }
+  }
+  var it = DriveApp.getFoldersByName(DRIVE_DOCS_FOLDER_NAME);
+  var folder = it.hasNext() ? it.next() : DriveApp.createFolder(DRIVE_DOCS_FOLDER_NAME);
+  props.setProperty('docsFolderId', folder.getId());
+  DOCS_FOLDER_CACHE = folder;
+  return folder;
+}
 
+/* Share both attachment folders with the reviewers so they can open what contractors
+ * send (no public links). Idempotent: only adds someone who isn't already on the
+ * folder, so re-running setup() doesn't re-notify everyone. Run setup() again after
+ * editing REVIEWERS — that is the ONLY place sharing should happen. */
+function shareFolder_(){
+  return 'Invoices: ' + shareOneFolder_(getFolder_()) +
+         ' | Documents: ' + shareOneFolder_(getDocsFolder_());
+}
+
+function shareOneFolder_(folder){
   /* Per-person viewer grants are what make Google notify people. First the
      "shared with you" mail, and then — for as long as the grant exists — an
      ongoing "files were added to a folder shared with you" activity feed plus
@@ -970,7 +1033,7 @@ function driveUrl_(id){ return 'https://drive.google.com/file/d/' + id + '/view'
  * PENDING-* and really lives in our folder). The cache is only ever a speed-up; it
  * is never the security boundary, so a caller still cannot get an arbitrary file
  * id renamed and linked into an invoice row. */
-function claimFile_(fileId, baseName){
+function claimFile_(fileId, baseName, kind){
   var id = String(fileId||''); if (!id) return '';
   var known = false;
   try { known = !!CacheService.getScriptCache().get('pend_'+id); } catch(e){}
@@ -978,7 +1041,7 @@ function claimFile_(fileId, baseName){
     queueRename_(id, baseName);
     return driveUrl_(id);
   }
-  return adoptFile_(id, baseName);
+  return adoptFile_(id, baseName, kind);
 }
 
 /* Renaming PENDING-xxxx to the invoice id is cosmetic — it keeps the Drive folder
@@ -1018,14 +1081,17 @@ function sweepRenames(){ Logger.log('Renamed ' + sweepRenames_(200) + ' file(s).
    filling out the form. Once they actually submit, rename it to the invoice ID so
    the Drive folder stays readable — and so anything still called PENDING-* is
    obviously an abandoned draft you can sweep up. */
-function adoptFile_(fileId, baseName){
+function adoptFile_(fileId, baseName, kind){
   try{
     var file = DriveApp.getFileById(String(fileId));
     /* Only ever touch files THIS flow created. Without these two checks a caller
        could hand us any file id the script account can reach and have it renamed
-       and linked into an invoice row. */
+       and linked into an invoice row. INV-026: a document is verified against the
+       DOCUMENTS folder — checking the wrong folder would make the guard reject every
+       real document and, worse, would accept a receipt id passed as a document. */
     if (file.getName().indexOf('PENDING-') !== 0) return '';
-    var target = getFolder_().getId(), inFolder = false, parents = file.getParents();
+    var target = (String(kind||'') === 'doc' ? getDocsFolder_() : getFolder_()).getId(),
+        inFolder = false, parents = file.getParents();
     while (parents.hasNext()){ if (parents.next().getId() === target){ inFolder = true; break; } }
     if (!inFolder) return '';
 
@@ -1042,7 +1108,10 @@ function setup(){
   ensureHeaders_();                                              // pick up columns added since launch
   sheet_(APPROVED_TAB).getRange('A2').setFormula(approvedFormula_());  // widen the QUERY to match
   restyle();                    // style existing tabs too, not just freshly created ones
-  var sharing = shareFolder_();  // the ONLY place the folder gets shared — see getFolder_()
+  /* The ONLY place the folders get shared — see getFolder_() / getDocsFolder_(). INV-026
+     added the second one; both are created on first reference, so a fresh setup() run is
+     what brings the documents folder into existence. */
+  var sharing = shareFolder_();
   var renamed = sweepRenames_(200);
   Logger.log('Setup complete. Tabs built + styled.\nDrive sharing: ' + sharing +
              '\nPENDING files renamed: ' + renamed +

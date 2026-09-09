@@ -79,6 +79,14 @@
   #rcptList{display:flex;flex-direction:column;gap:8px;margin-top:10px}
   /* itemised expenses — mirrors .line so the two sections read as one system */
   #expList{display:flex;flex-direction:column;gap:10px}
+  /* INV-026 — supporting documents. Same filebox look as the uploaded invoice, so a
+     contractor who has already attached one file recognises the row immediately. */
+  #docList{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+  .doc{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line-2);border-radius:9px;background:#fff}
+  .doc .nm{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--navy)}
+  .doc .sz{font-size:11.5px;color:var(--muted);flex:0 0 auto}
+  .doc .x{border:0;background:transparent;color:var(--muted);font-size:19px;line-height:1;cursor:pointer;flex:0 0 auto}
+  .doc .x:hover{color:#c0392b}
   .exp{display:grid;grid-template-columns:210px 100px minmax(130px,1fr) 168px 34px;gap:8px;align-items:end}
   .exp select,.exp input{width:100%}
   .exp select{font-size:14px}
@@ -216,6 +224,13 @@
           <div id="expList"></div>
           <button type="button" class="add-line" id="addExp">+ Add an expense</button>
         </div>
+        <div class="field full">
+          <label>Supporting documents <span class="hint">(optional — W9, payment/ACH details, anything else we should have on file)</span></label>
+          <div id="docList"></div>
+          <button type="button" class="add-line" id="addDoc">+ Add a document</button>
+          <p class="hint" style="margin:6px 0 0">These go to our accounting folder, separate from your receipts. Send them once and we won't have to chase them by email.</p>
+          <input type="file" id="docInput" multiple accept="image/*,application/pdf" style="display:none">
+        </div>
         <div class="field full"><label>Notes for the team <span class="hint">(optional)</span></label><textarea name="notes" placeholder="Anything we should know…"></textarea></div>
       </div>
       <div class="totals">
@@ -278,9 +293,12 @@ function toB64(file){return new Promise((res,rej)=>{const rd=new FileReader();rd
    api() (plain fetch, text/plain, no custom headers) and the bar is indeterminate
    on purpose. */
 
-/* One attachment: {file,name,size,pct,status,fileId}. status = uploading|done|error */
-function attach(file){
-  const a={file,name:file.name,size:file.size,status:'uploading',fileId:'',err:''};
+/* One attachment: {file,name,size,pct,status,fileId,kind}. status = uploading|done|error
+   INV-026: `kind` rides along to the backend, which routes 'doc' uploads into the
+   supporting-documents Drive folder instead of the receipts one. Blank = an invoice
+   file or a receipt, i.e. every caller that existed before documents did. */
+function attach(file,kind){
+  const a={file,name:file.name,size:file.size,status:'uploading',fileId:'',err:'',kind:kind||''};
   uploadOne(a);
   return a;
 }
@@ -289,7 +307,7 @@ function uploadOne(a){
   a.done=(async()=>{
     try{
       const b64=await toB64(a.file);
-      const r=await api({action:'uploadFile',file:{name:a.file.name,type:a.file.type,b64}});
+      const r=await api({action:'uploadFile',kind:a.kind||'',file:{name:a.file.name,type:a.file.type,b64}});
       if(r&&r.ok){a.status='done';a.fileId=r.fileId;}
       else{a.status='error';a.err=(r&&r.error)||'Upload failed';}
     }catch(e){a.status='error';a.err='Upload failed';}
@@ -304,9 +322,37 @@ function statusHTML(a,key){
 }
 function render(){
   renderInv();
+  renderDocs();
   $$('#expList .exp').forEach(row=>paintStatus(row.querySelector('.ex-status'),row._att));
   const rb=$('#invFileBox [data-retry]');if(rb)rb.onclick=()=>{if(invFile)uploadOne(invFile);};
   recalc();
+}
+
+/* ── INV-026: supporting documents ────────────────────────────────────────────
+   A W9 or an ACH form isn't evidence for a charge, so these deliberately do NOT
+   join the receipts: they upload with kind:'doc' (their own Drive folder), carry
+   the contractor's own filename to the review panel, and never touch the totals.
+   Multiple files at once, because "payment info and my W9" is one errand. */
+const docFiles=[];
+$('#addDoc').onclick=()=>$('#docInput').click();
+$('#docInput').onchange=function(){
+  [...this.files].forEach(f=>{
+    if(f.size>10*1024*1024){toast(`"${f.name}" is over 10MB`,'warn');return;}
+    docFiles.push(attach(f,'doc'));   /* uploads immediately, same as everything else */
+  });
+  this.value='';   /* so picking the same file again still fires onchange */
+  render();
+};
+function renderDocs(){
+  const box=$('#docList');if(!box)return;
+  box.innerHTML=docFiles.map((a,i)=>`<div class="doc">
+    <span class="nm">${esc(a.name)}</span><span class="sz">${(a.size/1024).toFixed(0)} KB</span>
+    ${statusHTML(a,'doc'+i)}
+    <button type="button" class="x" data-rm="${i}" aria-label="Remove ${esc(a.name)}">×</button></div>`).join('');
+  box.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{docFiles.splice(+b.dataset.rm,1);render();});
+  box.querySelectorAll('[data-retry]').forEach(b=>b.onclick=()=>{
+    const a=docFiles[+b.dataset.retry.slice(3)];if(a)uploadOne(a);
+  });
 }
 
 $('select[name=pm]').onchange=function(){$('#pmOtherWrap').style.display=this.value==='__other__'?'flex':'none';};
@@ -503,7 +549,7 @@ $('#f').addEventListener('submit',async e=>{
 
   /* Attachments started uploading when they were picked, so this is normally a
      no-op. If one is still in flight, wait on it rather than dropping it. */
-  const active=[...((mode==='file'&&invFile)?[invFile]:[]),...expenseAttachments()];
+  const active=[...((mode==='file'&&invFile)?[invFile]:[]),...expenseAttachments(),...docFiles];
   const inFlight=active.filter(a=>a.status==='uploading');
   if(inFlight.length){
     btn.innerHTML='<span class="spin"></span> Finishing upload…';
@@ -520,6 +566,13 @@ $('#f').addEventListener('submit',async e=>{
       invoiceNo,description,lineItems,notes:g('notes')};
     /* Files are already in Drive — send ids, not bytes. */
     if(mode==='file'&&invFile) payload.invoiceFileId=invFile.fileId;
+    /* INV-026 — supporting documents travel as {fileId,name}. The name is the
+       contractor's original filename: Drive renames the copy to the invoice id, and
+       "W9 2026.pdf" is the only thing that tells a reviewer what the chip is. Only
+       finished uploads go — anything still in flight was awaited above, anything in
+       error stopped the submit. */
+    const donePicked=docFiles.filter(a=>a.status==='done'&&a.fileId);
+    if(donePicked.length) payload.docs=donePicked.map(a=>({fileId:a.fileId,name:a.name}));
 
     const res=await api(payload);
     if(res&&res.ok){
