@@ -376,9 +376,11 @@ function submitInvoice(b){
  * copy of the submitted invoice; internal Drive links are not contractor access. */
 function notifySubmission_(row){
   try{
-    // Never fall back to the owner's personal address for contractor receipts.
-    var sender = 'accounting@limitlesslightsandsound.com';
-    if (String(Session.getEffectiveUser().getEmail()).toLowerCase() !== sender) return false;
+    // Receipt email is sent by the Accounting-owned service, never by this deployer.
+    var props = PropertiesService.getScriptProperties();
+    var receiptUrl = props.getProperty('RECEIPT_MAILER_URL');
+    var receiptSecret = props.getProperty('RECEIPT_SECRET');
+    if (!receiptUrl || !receiptSecret) return false;
     var email = String(row[COL['Email']]||'').trim();
     // One recipient only: the public form must not become a bulk-mail endpoint.
     if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(email)) return false;
@@ -423,8 +425,9 @@ function notifySubmission_(row){
     body.push('', 'Status: received, awaiting review. This is not an approval or payment confirmation.',
       'Payment terms: Net 15 from a correct submission.',
       'Keep this email and reference number for your records.', '', '— Limitless Lights & Sound');
-    MailApp.sendEmail({to:email, name:'Limitless Accounting', replyTo:sender, subject:'Received: invoice '+id, body:body.join('\n')});
-    return true;
+    var response = UrlFetchApp.fetch(receiptUrl, {method:'post', contentType:'application/json',
+      payload:JSON.stringify({secret:receiptSecret, to:email, id:id, body:body.join('\n')}), muteHttpExceptions:true});
+    return response.getResponseCode() === 200 && JSON.parse(response.getContentText()).ok === true;
   }catch(e){
     console.error('Invoice confirmation email failed');
     return false;

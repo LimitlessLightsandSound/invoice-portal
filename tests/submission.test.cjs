@@ -65,9 +65,9 @@ for (const file of ['index.html', 'install.html']) {
   });
 }
 
-function backend({mailFails=false,writeFails=false,sender='accounting@limitlesslightsandsound.com'}={}) {
+function backend({mailFails=false,writeFails=false,configured=true}={}) {
   const events=[], rows=[], emails=[];
-  const context=vm.createContext({Session:{getEffectiveUser:()=>({getEmail:()=>sender})},console:{error(){}}, Utilities:{formatDate:()=> '20260923'}, MailApp:{sendEmail(email){events.push('mail'); if(mailFails) throw Error('quota'); emails.push(email);}}});
+  const context=vm.createContext({PropertiesService:{getScriptProperties:()=>({getProperty:()=>configured?'configured':null})},UrlFetchApp:{fetch(_url,options){const message=JSON.parse(options.payload);events.push('mail');if(mailFails) throw Error('quota');emails.push(message);return {getResponseCode:()=>200,getContentText:()=>'{"ok":true}'};}},console:{error(){}}, Utilities:{formatDate:()=> '20260923'}, MailApp:{sendEmail(email){events.push('mail'); if(mailFails) throw Error('quota'); emails.push(email);}}});
   vm.runInContext(read('Code.gs'),context);
   context.ensureSheets_=()=>{};
   context.sheet_=()=>({appendRow(row){events.push('saved');if(writeFails) throw Error('write failed');rows.push(row);}});
@@ -98,9 +98,33 @@ test('does not allow multiple email recipients on a public submission',()=>{
   assert.equal(result.emailSent,false);assert.equal(emails.length,0);
 });
 
-test('never sends a contractor receipt from Dash when Accounting is required',()=>{
-  const {context,emails,rows}=backend({sender:'dash@limitlesslightsandsound.com'});
+test('never falls back to Dash when the Accounting mail service is not configured',()=>{
+  const {context,emails,rows}=backend({configured:false});
   const result=context.submitInvoice(input);
   assert.equal(result.ok,true);assert.equal(result.emailSent,false);
   assert.equal(rows.length,1);assert.equal(emails.length,0);
+});
+
+function mailer({sender='accounting@limitlesslightsandsound.com'}={}) {
+  const sent=[], cache=new Map();
+  const context=vm.createContext({console:{error(){}},Session:{getEffectiveUser:()=>({getEmail:()=>sender})},
+    PropertiesService:{getScriptProperties:()=>({getProperty:()=> 'test-secret'})},
+    LockService:{getScriptLock:()=>({tryLock:()=>true,hasLock:()=>true,releaseLock(){}})},
+    CacheService:{getScriptCache:()=>({get:k=>cache.get(k),put:(k,v)=>cache.set(k,v)})},
+    MailApp:{sendEmail:message=>sent.push(message)}});
+  vm.runInContext(read('accounting-mailer/Code.gs'),context);context.reply_=value=>value;
+  return {sent,send:input=>context.doPost({postData:{contents:JSON.stringify(input)}})};
+}
+const receipt={secret:'test-secret',id:'INV-TEST',to:'contractor@example.com',body:'Invoice copy'};
+test('Accounting service validates its secret and running identity before any mail',()=>{
+  const service=mailer();assert.equal(service.send({...receipt,secret:'wrong'}).ok,false);assert.equal(service.sent.length,0);
+  const dash=mailer({sender:'dash@limitlesslightsandsound.com'});assert.equal(dash.send(receipt).ok,false);assert.equal(dash.sent.length,0);
+});
+test('Accounting service sends a receipt once and uses Accounting reply-to',()=>{
+  const service=mailer();assert.equal(service.send(receipt).ok,true);assert.equal(service.send(receipt).ok,true);
+  assert.equal(service.sent.length,1);assert.equal(service.sent[0].replyTo,'accounting@limitlesslightsandsound.com');
+});
+test('Accounting service rejects multiple recipients and malformed references',()=>{
+  const service=mailer();assert.equal(service.send({...receipt,to:'a@example.com,b@example.com'}).ok,false);
+  assert.equal(service.send({...receipt,id:'not an invoice'}).ok,false);assert.equal(service.sent.length,0);
 });

@@ -242,8 +242,28 @@ email status reporting, save-before-mail ordering, and mail/write failures.
 
 
 **Required receipt sender:** `accounting@limitlesslightsandsound.com` (September 23).
-Receipt sending now fails closed unless the script runs as that account; it must
-never silently send from Dash. The forms are published, but the receipt backend
-has not been activated while Accounting account/send-as access is being established.
-Changing only Reply-To is insufficient. If Accounting is a group or alias, a
-verified send-as integration is needed instead of MailApp's default sender.
+The invoice backend retains its existing Sheet, Drive, and deployment identity.
+Receipt messages are sent through `accounting-mailer/Code.gs`, a separate Apps Script
+owned by Accounting. It uses MailApp (send mail only, no inbox access), checks the
+executing account, and requires a private shared key on every request. There is no
+fallback to Dash. Existing adjustment emails are unchanged.
+
+Accounting project: `158kGWuzfziYg1sjpG7hU16zedfjXx_dpAbYu3L7YSMOoOQ4FBbF1xM60`.
+The project source is saved and verified in the Apps Script editor. Authorization
+and deployment are still pending; receipt emails are not active yet.
+
+To finish activation:
+1. Authorize `authorizeMailer` as Accounting (this checks quota; it sends no email).
+2. Set a random `RECEIPT_SECRET` in the Accounting project's Script Properties.
+3. Deploy the mailer as a web app, executing as Accounting, reachable by the backend.
+   All email requests require the private key; keep it out of Git and the HTML forms.
+4. Set the same `RECEIPT_SECRET` and the mailer's `/exec` URL as `RECEIPT_MAILER_URL`
+   in the existing invoice backend's Script Properties.
+5. Compare the live backend with this checkout, preserve any intervening changes,
+   update its source, then publish a new version of its existing deployment.
+6. Verify the mailer health response and that requests without its key fail closed.
+
+The mailer serializes sends and caches receipt IDs for six hours to suppress
+immediate repeated delivery requests. This is not a durable invoice deduplication
+system. A mail failure still leaves the saved invoice intact and is reported to the
+contractor. Tests mock both services and send no real mail.
