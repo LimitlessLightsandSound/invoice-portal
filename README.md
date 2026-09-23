@@ -239,3 +239,11 @@ Run `npm ci` then `npm test`. Tests exercise both forms in jsdom and run `Code.g
 with mocked Sheet and MailApp services, so no invoices are created and no real mail
 is sent. They cover Enter handling, copied rows and OT, explicit submission,
 email status reporting, save-before-mail ordering, and mail/write failures.
+
+
+**Required receipt sender:** `accounting@limitlesslightsandsound.com` (September 23).
+Receipt sending now fails closed unless the script runs as that account; it must
+never silently send from Dash. The forms are published, but the receipt backend
+has not been activated while Accounting account/send-as access is being established.
+Changing only Reply-To is insufficient. If Accounting is a group or alias, a
+verified send-as integration is needed instead of MailApp's default sender.

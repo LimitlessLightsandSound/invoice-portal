@@ -376,6 +376,9 @@ function submitInvoice(b){
  * copy of the submitted invoice; internal Drive links are not contractor access. */
 function notifySubmission_(row){
   try{
+    // Never fall back to the owner's personal address for contractor receipts.
+    var sender = 'accounting@limitlesslightsandsound.com';
+    if (String(Session.getEffectiveUser().getEmail()).toLowerCase() !== sender) return false;
     var email = String(row[COL['Email']]||'').trim();
     // One recipient only: the public form must not become a bulk-mail endpoint.
     if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(email)) return false;
@@ -420,7 +423,7 @@ function notifySubmission_(row){
     body.push('', 'Status: received, awaiting review. This is not an approval or payment confirmation.',
       'Payment terms: Net 15 from a correct submission.',
       'Keep this email and reference number for your records.', '', '— Limitless Lights & Sound');
-    MailApp.sendEmail({to:email, subject:'Received: invoice '+id, body:body.join('\n')});
+    MailApp.sendEmail({to:email, name:'Limitless Accounting', replyTo:sender, subject:'Received: invoice '+id, body:body.join('\n')});
     return true;
   }catch(e){
     console.error('Invoice confirmation email failed');

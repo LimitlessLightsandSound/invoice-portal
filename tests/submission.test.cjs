@@ -65,9 +65,9 @@ for (const file of ['index.html', 'install.html']) {
   });
 }
 
-function backend({mailFails=false,writeFails=false}={}) {
+function backend({mailFails=false,writeFails=false,sender='accounting@limitlesslightsandsound.com'}={}) {
   const events=[], rows=[], emails=[];
-  const context=vm.createContext({console:{error(){}}, Utilities:{formatDate:()=> '20260923'}, MailApp:{sendEmail(email){events.push('mail'); if(mailFails) throw Error('quota'); emails.push(email);}}});
+  const context=vm.createContext({Session:{getEffectiveUser:()=>({getEmail:()=>sender})},console:{error(){}}, Utilities:{formatDate:()=> '20260923'}, MailApp:{sendEmail(email){events.push('mail'); if(mailFails) throw Error('quota'); emails.push(email);}}});
   vm.runInContext(read('Code.gs'),context);
   context.ensureSheets_=()=>{};
   context.sheet_=()=>({appendRow(row){events.push('saved');if(writeFails) throw Error('write failed');rows.push(row);}});
@@ -96,4 +96,11 @@ test('does not allow multiple email recipients on a public submission',()=>{
   const {context,emails}=backend();
   const result=context.submitInvoice({...input,email:'a@example.com,b@example.com'});
   assert.equal(result.emailSent,false);assert.equal(emails.length,0);
+});
+
+test('never sends a contractor receipt from Dash when Accounting is required',()=>{
+  const {context,emails,rows}=backend({sender:'dash@limitlesslightsandsound.com'});
+  const result=context.submitInvoice(input);
+  assert.equal(result.ok,true);assert.equal(result.emailSent,false);
+  assert.equal(rows.length,1);assert.equal(emails.length,0);
 });
