@@ -70,6 +70,8 @@
   .line{display:grid;grid-template-columns:138px minmax(112px,1fr) 62px 78px 94px 34px;gap:8px;align-items:end}
   .line .calc{font-weight:700;color:var(--navy);font-size:14px;background:var(--blue-bg);border:1.5px solid #cfe0f1;border-radius:9px;padding:11px 13px;text-align:right}
   .del{height:42px;width:34px;border:1.5px solid var(--line-2);background:#fff;border-radius:9px;cursor:pointer;color:var(--red);font-size:18px;display:grid;place-items:center}
+  .line .copy-line{grid-column:1/-1;justify-self:start;border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--navy);padding:6px 10px;cursor:pointer;font:inherit;font-size:13px;order:7}
+  .line .copy-line:hover{background:var(--blue-bg)}
   .del:hover{background:var(--red-bg);border-color:var(--red)}
   .add-line{margin-top:12px;border:1.5px dashed var(--line-2);background:transparent;color:var(--navy);font-family:'Inter';font-weight:600;font-size:13px;padding:10px;border-radius:9px;cursor:pointer;width:100%}
   .add-line:hover{border-color:var(--blue);background:var(--blue-bg)}
@@ -245,6 +247,7 @@
     <h2>Invoice submitted</h2>
     <p>Thanks — your invoice is now with the Limitless install team for review. You'll hear back once it's approved.</p>
     <div class="ref" id="refOut"></div>
+    <p id="emailOut" role="status"></p>
     <div style="margin-top:22px"><button class="btn btn-primary" onclick="location.reload()">Submit another</button></div>
   </div>
 
@@ -383,8 +386,25 @@ function lineRow(){
     <div class="field li-hrs-cell"><label>Hours</label><input class="li-hrs" type="number" min="0" step="0.25" placeholder="0"></div>
     <div class="field li-rate-cell"><label>Rate ($/hr)</label><input class="li-rate" type="number" min="0" step="0.01" placeholder="0.00"></div>
     <div class="field li-total-cell"><label>Line total</label><div class="calc">$0.00</div></div>
-    <button type="button" class="del">×</button>`;
+    <button type="button" class="del" aria-label="Remove line">×</button>
+    <button type="button" class="copy-line">Copy line</button>`;
   d.querySelector('.del').onclick=()=>{d.remove();recalc();};
+  d.querySelector('.copy-line').onclick=()=>{
+    const copy=lineRow();
+    ['.li-date','.li-desc','.li-hrs','.li-rate','.li-ot'].forEach(selector=>{
+      const source=d.querySelector(selector),target=copy.querySelector(selector);
+      if(source&&target) target.value=source.value;
+    });
+    const toggle=d.querySelector('.li-ot-toggle');
+    if(toggle){
+      copy.querySelector('.li-ot-toggle').checked=toggle.checked;
+      copy.querySelector('.li-ot-cell').classList.toggle('off',!toggle.checked);
+    }
+    d.after(copy);
+    recalc();
+    copy.querySelector('.li-date').focus();
+    toast('Line copied — update the date for the next day');
+  };
   d.querySelectorAll('.li-hrs,.li-rate').forEach(i=>i.oninput=recalc);
   return d;
 }
@@ -487,8 +507,16 @@ function paintStatus(el,a){
   el.title=a.name+' attached';
 }
 
+// Enter in a field must never send a partly completed invoice. Buttons retain
+// keyboard activation and the notes textarea retains ordinary newlines.
+$('#f').addEventListener('keydown',e=>{
+  if(e.key==='Enter' && e.target instanceof HTMLInputElement && e.target.type!=='file'){
+    e.preventDefault();
+  }
+});
 $('#f').addEventListener('submit',async e=>{
   e.preventDefault();
+  if($('#submitBtn').disabled) return;
   if(API.indexOf('PASTE_')===0){toast('Backend URL not set yet (see SETUP)','err');return;}
   const g=n=>$('#f').elements[n]?.value.trim()||'';
   const pm=g('pm');
@@ -559,6 +587,9 @@ $('#f').addEventListener('submit',async e=>{
     if(res&&res.ok){
       $('#f').style.display='none';
       $('#refOut').textContent='Reference: '+res.id;
+      $('#emailOut').textContent=res.emailSent===true
+        ? 'An invoice copy was sent to '+payload.email+'. Check your spam folder if it does not arrive.'
+        : 'Your invoice is saved, but an email copy was not sent. Keep the reference above; please do not resubmit.';
       $('#done').classList.add('show');
       window.scrollTo({top:0,behavior:'smooth'});
     }else{

@@ -210,3 +210,32 @@ Controllers deliberately can't approve — the person who pays isn't the person 
 `canReview_(session, billingType)` is the single source of truth, and `listInvoices` mirrors it: a scoped approver sees only their tab, everyone else sees both.
 
 Stamps are `ReviewedBy/At/Note` (whoever approved or rejected) and `EscalatedBy/At/Note` (whoever asked for the cross review).
+
+
+## Contractor submission fixes (September 2026)
+
+Both forms block Enter from implicitly submitting while typing in input fields. The
+Submit invoice button remains keyboard accessible; notes retain multiline entry.
+Each labor row has **Copy line**, which duplicates the date, description, hours,
+rate, and production overtime settings. Focus moves to the copied date so the
+contractor can update it for the next show day. Each copied row remains independent.
+
+After the Sheet append succeeds, `submitInvoice` sends a plain-text invoice copy to
+the submitted email address: reference, job, line items including OT rate, expenses,
+notes, and totals. Uploaded invoices are acknowledged as on file; files and internal
+Drive links are not included. Existing adjustment emails remain separate.
+`emailSent` reports whether MailApp accepted the send, not final inbox delivery.
+Mail failure leaves the invoice saved and the success screen tells the contractor
+not to resubmit. The forms also handle an older backend without `emailSent` honestly.
+
+Deployment requires **both** publishing the HTML files through GitHub Pages and
+updating `Code.gs` in the existing Apps Script project, authorizing MailApp if needed,
+and creating a new version of the existing web-app deployment (keep its URL).
+Changes in this checkout alone do not update the running Apps Script backend.
+
+### Regression tests
+
+Run `npm ci` then `npm test`. Tests exercise both forms in jsdom and run `Code.gs`
+with mocked Sheet and MailApp services, so no invoices are created and no real mail
+is sent. They cover Enter handling, copied rows and OT, explicit submission,
+email status reporting, save-before-mail ordering, and mail/write failures.

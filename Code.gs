@@ -367,7 +367,65 @@ function submitInvoice(b){
   row[COL['DocsJSON']]      = docs.length ? JSON.stringify(docs) : '';
 
   sheet_(tabForType_(billingType)).appendRow(row);
-  return json({ ok:true, id:id });
+  var emailSent = notifySubmission_(row);
+  return json({ ok:true, id:id, emailSent:emailSent });
+}
+
+/* Send only after appendRow succeeds. A mail failure must not make a saved
+ * invoice look rejected and encourage a duplicate submission. This is a text
+ * copy of the submitted invoice; internal Drive links are not contractor access. */
+function notifySubmission_(row){
+  try{
+    var email = String(row[COL['Email']]||'').trim();
+    // One recipient only: the public form must not become a bulk-mail endpoint.
+    if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(email)) return false;
+    var id = String(row[COL['InvoiceID']]||'');
+    var body = [
+      'Hi ' + (String(row[COL['Contractor']]||'').split(' ')[0] || 'there') + ',',
+      '',
+      'We received your invoice. Here is a copy of the details you submitted.',
+      '',
+      'Reference: ' + id,
+      'Contractor: ' + String(row[COL['Contractor']]||''),
+      'Company: ' + String(row[COL['Company']]||''),
+      'Job: ' + String(row[COL['Job']]||''),
+      'Project manager: ' + String(row[COL['PM']]||''),
+      'Billing type: ' + String(row[COL['BillingType']]||''),
+      'Invoice number: ' + String(row[COL['Ref/InvoiceNo']]||id),
+    ];
+    var lines = safeParse_(String(row[COL['LineItemsJSON']]||''));
+    if (Array.isArray(lines) && lines.length){
+      body.push('', 'Line items:');
+      lines.forEach(function(l){
+        body.push('  ' + (l.date||'—') + ' | ' + (l.desc||'—') +
+          ' | Regular: ' + (Number(l.hours)||0) + ' hrs @ ' + fmtMoney_(l.rate) + '/hr' +
+          (Number(l.otHours)>0 ? ' | OT: ' + l.otHours + ' hrs @ ' + fmtMoney_(Number(l.rate)*1.5) + '/hr' : '') +
+          ' | Total: ' + fmtMoney_(l.total));
+      });
+    } else if(row[COL['InvoiceFileURL']]) {
+      body.push('', 'Your uploaded invoice is on file with our team.');
+    }
+    var expenses = safeParse_(String(row[COL['ExpensesJSON']]||''));
+    if(Array.isArray(expenses) && expenses.length){
+      body.push('', 'Expenses:');
+      expenses.forEach(function(e){
+        body.push('  ' + e.category + (e.desc ? ' — ' + e.desc : '') + ': ' + fmtMoney_(e.amount));
+      });
+    }
+    body.push('',
+      'Labor / uploaded invoice total: ' + fmtMoney_(row[COL['LaborAmount']]),
+      'Expenses total: ' + fmtMoney_(row[COL['ExpensesTotal']]),
+      'Invoice total: ' + fmtMoney_(row[COL['Amount']]));
+    if(row[COL['Notes']]) body.push('', 'Your notes: ' + String(row[COL['Notes']]));
+    body.push('', 'Status: received, awaiting review. This is not an approval or payment confirmation.',
+      'Payment terms: Net 15 from a correct submission.',
+      'Keep this email and reference number for your records.', '', '— Limitless Lights & Sound');
+    MailApp.sendEmail({to:email, subject:'Received: invoice '+id, body:body.join('\n')});
+    return true;
+  }catch(e){
+    console.error('Invoice confirmation email failed');
+    return false;
+  }
 }
 
 /***** LIST (token) *****/
