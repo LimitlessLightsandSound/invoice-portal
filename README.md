@@ -277,3 +277,9 @@ The mailer serializes sends and caches receipt IDs for six hours to suppress
 immediate repeated delivery requests. This is not a durable invoice deduplication
 system. A mail failure still leaves the saved invoice intact and is reported to the
 contractor. Tests mock both services and send no real mail.
+
+### September 23 reliability diagnostics
+
+Main API deployment **version 9**, September 23, 2026 at 06:40 America/Chicago, retains the existing `/exec` URL and Accounting receipt relay. Each POST logs only the recognized action name, a coarse result category and duration. Application errors previously returned `ok:false` while appearing as Completed executions with no detail. The new `invoice_request` entries expose these failures without tokens, raw error messages, email addresses or invoice contents. Logging failures never alter a saved result.
+
+Validation: 21 tests pass. A live unauthenticated `list` smoke check returned `Not signed in.` as expected; no invoice was written or email sent.

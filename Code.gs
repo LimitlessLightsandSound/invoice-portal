@@ -163,23 +163,40 @@ function doGet(e){
   return json({ ok:true, service:'Limitless Invoice API', time:new Date().toISOString() });
 }
 function doPost(e){
+  var started = Date.now(), action = 'unknown', response;
   try{
     var body = {};
     if (e && e.postData && e.postData.contents) body = JSON.parse(e.postData.contents);
-    var action = body.action || '';
+    var requested = body.action || '';
+    // Only log known action names, never request bodies, tokens or invoice contents.
+    var known = ['firebaseLogin','uploadFile','submit','list','act','archiveSweep','editInvoice'];
+    action = known.indexOf(requested) >= 0 ? requested : 'unknown';
     switch(action){
-      case 'firebaseLogin': return firebaseLogin(body); // CRM console sign-in
-      case 'uploadFile' : return uploadFile(body);      // PUBLIC (no token)
-      case 'submit'     : return submitInvoice(body);   // PUBLIC (no token)
-      case 'list'       : return listInvoices(body);    // token required
-      case 'act'        : return actOnInvoice(body);    // token required
-      case 'archiveSweep': return archiveSweep(body);   // token required (INV-020 bulk archive)
-      case 'editInvoice': return editInvoice(body);     // token required (INV-022 internal adjustments)
-      default           : return json({ ok:false, error:'Unknown action' });
+      case 'firebaseLogin': response = firebaseLogin(body); break;
+      case 'uploadFile': response = uploadFile(body); break;
+      case 'submit': response = submitInvoice(body); break;
+      case 'list': response = listInvoices(body); break;
+      case 'act': response = actOnInvoice(body); break;
+      case 'archiveSweep': response = archiveSweep(body); break;
+      case 'editInvoice': response = editInvoice(body); break;
+      default: response = json({ ok:false, error:'Unknown action' });
     }
   }catch(err){
-    return json({ ok:false, error:String(err && err.message || err) });
+    response = json({ ok:false, error:String(err && err.message || err) });
   }
+  // Logging must never turn an already-saved payment/submission into a failed request.
+  try{
+    var result = JSON.parse(response.getContent());
+    var message = String(result.error || '');
+    var category = result.ok ? 'ok' :
+      /not signed in/i.test(message) ? 'session_expired' :
+      /quota|too many|rate limit|invoked too/i.test(message) ? 'quota' :
+      /timed? ?out|timeout/i.test(message) ? 'timeout' :
+      /permission|authorized|allow-list/i.test(message) ? 'authorization' : 'application_error';
+    var entry = JSON.stringify({event:'invoice_request',action:action,outcome:category,durationMs:Date.now()-started});
+    if (result.ok) console.log(entry); else console.error(entry);
+  }catch(loggingError){}
+  return response;
 }
 
 /***** SIGN-IN — GOOGLE ONLY *****/
