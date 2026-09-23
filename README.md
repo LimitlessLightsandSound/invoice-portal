@@ -283,3 +283,9 @@ contractor. Tests mock both services and send no real mail.
 Main API deployment **version 9**, September 23, 2026 at 06:40 America/Chicago, retains the existing `/exec` URL and Accounting receipt relay. Each POST logs only the recognized action name, a coarse result category and duration. Application errors previously returned `ok:false` while appearing as Completed executions with no detail. The new `invoice_request` entries expose these failures without tokens, raw error messages, email addresses or invoice contents. Logging failures never alter a saved result.
 
 Validation: 21 tests pass. A live unauthenticated `list` smoke check returned `Not signed in.` as expected; no invoice was written or email sent.
+
+### Paid-to-unpaid correction
+
+The `unpaid` action returns a paid invoice to `approved` (Due for Payment), preserving the approval stamp and amount. It uses the same `canPay_` permission as marking paid, rejects archived/non-paid rows, and clears the current BilledBy/BilledAt/BillRef after appending the old stamp and reversal actor/time to PaymentHistoryJSON (new trailing column AJ). Status actions hold a script lock to serialize overlapping writes. Repeat reversals are rejected after the first succeeds.
+
+Before deploying this version, run `preparePaymentHistory()` once to ensure column AJ and its header exist in both data tabs; this does not change invoice statuses. The existing API URL and Accounting receipt relay remain unchanged. Test command: `node --test tests/*.test.cjs` (25 passing tests).

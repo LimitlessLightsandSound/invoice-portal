@@ -148,7 +148,7 @@ const HEADERS = ['Timestamp','InvoiceID','Status','BillingType','Contractor','Co
      Appended at the very end, per the rule above: putting it beside 'Archived' where it
      reads better would have shifted the three INV-022 columns and silently rewired every
      adjusted row. Blank on every row submitted before this shipped. Col AI / Col35. */
-  'DocsJSON'];
+  'DocsJSON','PaymentHistoryJSON'];
 
 /* Reimbursable expense categories. The form's dropdown is built from this list, and
    submit rejects anything not on it — otherwise the categories drift and the whole
@@ -501,6 +501,12 @@ function readData_(tab){
  * (canReview_) can approve / reject / escalate whatever is still open. Escalate
  * flags it for a cross review; it does not hand it to a particular person. */
 function actOnInvoice(b){
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return json({ok:false,error:'Another invoice change is finishing. Please try again.'});
+  try { return actOnInvoiceLocked_(b); }
+  finally { lock.releaseLock(); }
+}
+function actOnInvoiceLocked_(b){
   var s = session(b.token);
   if (!s) return json({ ok:false, error:'Not signed in.' });
   var id = b.id, act = b.verb, note = b.note||'', billRef = b.billRef||'';
@@ -540,6 +546,17 @@ function actOnInvoice(b){
       row[COL['BilledBy']] = s.name; row[COL['BilledAt']] = now; row[COL['BillRef']] = billRef;
       row[COL['Status']] = 'billed'; allowed = true;
     }
+  } else if (act === 'unpaid'){
+    if (canPay_(s) && status === 'billed' && String(row[COL['Archived']]||'').toLowerCase() !== 'yes'){
+      var history = row[COL['PaymentHistoryJSON']] ? safeParse_(row[COL['PaymentHistoryJSON']]) : [];
+      if (!Array.isArray(history)) return json({ok:false,error:'Payment history could not be read. No change was made.'});
+      history.push({by:s.name,at:now.toISOString(),previous:{
+        by:row[COL['BilledBy']]||'',at:row[COL['BilledAt']]?new Date(row[COL['BilledAt']]).toISOString():'',ref:row[COL['BillRef']]||''
+      }});
+      row[COL['PaymentHistoryJSON']] = JSON.stringify(history);
+      row[COL['BilledBy']] = ''; row[COL['BilledAt']] = ''; row[COL['BillRef']] = '';
+      row[COL['Status']] = 'approved'; allowed = true;
+    }
   } else if (act === 'reopen'){
     /* Reopening a BILLED invoice unwinds a payment record, so that stays with the
        owner. Anything else a reviewer can put back in the queue. */
@@ -563,7 +580,7 @@ function actOnInvoice(b){
     if ((act === 'archive' || act === 'unarchive') && !canArchive_(s, billingType)){
       return json({ ok:false, error:'That billing type is outside your queue, so you cannot file it.' });
     }
-    if (!reviewer && act !== 'billed' && act !== 'archive' && act !== 'unarchive'){
+    if (!reviewer && act !== 'billed' && act !== 'unpaid' && act !== 'archive' && act !== 'unarchive'){
       return json({ ok:false, error: s.role === 'controller'
         ? 'Controllers mark invoices paid; they do not approve them.'
         : 'That billing type is outside your queue.' });
@@ -975,6 +992,7 @@ function rowToObj_(r){
     escalated:{ by:o['EscalatedBy'], at: o['EscalatedAt']?new Date(o['EscalatedAt']).toISOString():'', note:o['EscalationNote'] },
     stage1:{ by:o['ReviewedBy'], at: o['ReviewedAt']?new Date(o['ReviewedAt']).toISOString():'', note:o['ReviewNote'] },
     stage2:{ by:o['EscalatedBy'], at: o['EscalatedAt']?new Date(o['EscalatedAt']).toISOString():'', note:o['EscalationNote'] },
+    paymentHistory: o['PaymentHistoryJSON'] ? (safeParse_(o['PaymentHistoryJSON'])||[]) : [],
     billed:{ by:o['BilledBy'], at: o['BilledAt']?new Date(o['BilledAt']).toISOString():'', ref:o['BillRef'] },
     /* INV-020: rows predating the Archived column read blank -> false (live). */
     archived: String(o['Archived']||'').toLowerCase() === 'yes',
@@ -1204,4 +1222,14 @@ function restyle(){
   styleDataTab_(sheet_(PRODUCTIONS_TAB), ACCENT.production);
   styleDataTab_(sheet_(INSTALLS_TAB),    ACCENT.install);
   styleApprovedTab_(sheet_(APPROVED_TAB));
+}
+
+// Run once before publishing the payment-reversal version. Appends one audit column only.
+function preparePaymentHistory(){
+  DATA_TABS.forEach(function(name){
+    var sh = sheet_(name), needed = HEADERS.length, current = sh.getMaxColumns();
+    if (current < needed) sh.insertColumnsAfter(current, needed-current);
+    sh.getRange(1,COL['PaymentHistoryJSON']+1).setValue('PaymentHistoryJSON');
+  });
+  console.log('Payment history column ready. Invoice statuses were not changed.');
 }
