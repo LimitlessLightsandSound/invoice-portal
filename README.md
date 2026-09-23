@@ -249,10 +249,20 @@ executing account, and requires a private shared key on every request. There is 
 fallback to Dash. Existing adjustment emails are unchanged.
 
 Accounting project: `158kGWuzfziYg1sjpG7hU16zedfjXx_dpAbYu3L7YSMOoOQ4FBbF1xM60`.
-The project source is saved and verified in the Apps Script editor. Authorization
-and deployment are still pending; receipt emails are not active yet.
+Activated September 23, 2026:
+- Accounting mail service: version 1, execution identity Accounting, MailApp authorized.
+- Existing invoice backend: version 8, same public URL and data-storage identity.
+- Both HTML forms: Enter protection, Copy line, and receipt status published.
+- Private connection values are stored in Script Properties, not Git or the forms.
+- Verified both service responses, rejection of unauthenticated mail requests,
+  the Accounting authorization/quota check, and 18 automated tests. No test invoices
+  or real email messages were created during deployment.
 
-To finish activation:
+Mailer deployment: `AKfycbzJHQ5Pug97fMcojmPEQH31G396mV_NhPwsK0xZhWaBTWPzjPA-gzq_Vs8vRjwNBpfF5Q`.
+Invoice deployment: `AKfycbxx3HXJPa3qjQkiuB4JUP0VGX_qwGjLMx9W8-RY5qejLQ9pMlDfJiWrzPmFTnYwe91v`.
+The pre-update live invoice source matched repository baseline `59818a8` exactly.
+
+Deployment/recovery procedure:
 1. Authorize `authorizeMailer` as Accounting (this checks quota; it sends no email).
 2. Set a random `RECEIPT_SECRET` in the Accounting project's Script Properties.
 3. Deploy the mailer as a web app, executing as Accounting, reachable by the backend.
